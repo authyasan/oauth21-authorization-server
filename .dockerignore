@@ -1,0 +1,20 @@
+# 書籍原稿・履歴・環境ファイル・署名鍵をビルドコンテキストに渡さない。
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!tsconfig.json
+!drizzle.config.ts
+!biome.json
+!vitest.config.ts
+!src/
+!src/**
+!test/
+!test/unit/
+!test/unit/**
+!scripts/
+!scripts/generate-keys.ts
+!scripts/tsconfig.json
+!docker/
+!docker/**

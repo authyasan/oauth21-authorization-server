@@ -1,0 +1,52 @@
+# 手元で試す教材用。固定パスワードを実サービスへ流用しない。
+name: oauth21-quickstart
+
+x-app: &app
+  build: .
+  environment:
+    DATABASE_URL: postgresql://oauth21:oauth21_sample_only@postgres:5432/oauth21
+    HOST: 0.0.0.0
+    PORT: "3000"
+    ISSUER: http://localhost:3000
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16.13-alpine
+    environment:
+      POSTGRES_DB: oauth21
+      POSTGRES_USER: oauth21
+      POSTGRES_PASSWORD: oauth21_sample_only
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oauth21 -d oauth21"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  setup:
+    <<: *app
+    profiles: ["setup"]
+    command: ["sh", "docker/setup.sh"]
+    volumes:
+      - signing_keys:/app/keys
+
+  app:
+    <<: *app
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - signing_keys:/app/keys:ro
+    command: ["sh", "docker/start.sh"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/.well-known/oauth-authorization-server').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  database:
+  signing_keys:

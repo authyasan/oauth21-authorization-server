@@ -1,0 +1,14 @@
+[
+	{
+		"resourceServerId": "resource-server-1",
+		"resourceServerName": "サンプルリソースサーバー",
+		"secretHash": "8ac950188678f9bb3524b275130332b511bf5092394da6975b5fb9e84302f026",
+		"protectedScopes": ["read", "write"]
+	},
+	{
+		"resourceServerId": "resource-server-2",
+		"resourceServerName": "サンプルリソースサーバー2（admin専用）",
+		"secretHash": "0634dc38bbd84354ca9b19512a2722484c8cb1b2e2537fe045ce9413c9a4b1b6",
+		"protectedScopes": ["admin"]
+	}
+]

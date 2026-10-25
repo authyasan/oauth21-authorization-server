@@ -1,0 +1,53 @@
+# 依存パッケージ
+node_modules/
+
+# ビルド出力
+dist/
+
+# 環境変数
+.env
+
+# Drizzle マイグレーション出力
+drizzle/
+
+# JWT署名鍵
+keys/
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# テストカバレッジ
+coverage/
+
+# Playwright
+test-results/
+playwright-report/
+
+# ドキュメント（セッション記録とPDFは管理対象外）
+docs/sessions/
+docs/*.pdf
+
+# Typst ビルド生成物
+book/*.pdf
+book/*.pdf.lock
+book/.typst-cache/
+book/images/_ignore/
+
+# Claude Code（skills のみ履歴管理する。settings 等の私物は ignore）
+.claude/*
+!.claude/skills/
+
+# メモ
+memo.md
+book/執筆メモ.md
+book/前著表現帳.md
+
+# 仕様書PDF（ルート直下、生成物）
+/仕様書.pdf
