@@ -8,7 +8,6 @@ import type { MiddlewareHandler } from "hono";
  * Pragma: no-cache は付けない。RFC 9111 §5.4 は Pragma を非推奨とし、応答での意味は
  * 定められていないとする。HTTP/1.0 キャッシュとの互換は要件にしない。
  */
-// #@range_begin(security-headers) ※書籍掲載用の範囲マーカー
 export const securityHeaders: MiddlewareHandler = async (c, next) => {
 	await next();
 
@@ -38,4 +37,3 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
 	);
 };
-// #@range_end(security-headers)

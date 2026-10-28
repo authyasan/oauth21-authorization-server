@@ -90,7 +90,6 @@ export function isLoopbackUri(uri: string): boolean {
  * @param registeredUri クライアントに登録されたredirect_uri
  * @returns ポート番号を除いて一致する場合true
  */
-// #@range_begin(loopback-redirect-uri-match) ※書籍掲載用の範囲マーカー
 export function isLoopbackRedirectUriMatch(requestUri: string, registeredUri: string): boolean {
 	// registeredUriは設定読み込み時にURL解析・スキーム・fragment禁止を確認済み。
 	// [SECURITY] 空のfragmentも拒否する。URL.hashでは末尾の「#」を検出できない。
@@ -107,10 +106,8 @@ export function isLoopbackRedirectUriMatch(requestUri: string, registeredUri: st
 	const registeredWithoutPort = removeLoopbackPort(registeredUri);
 	return requestWithoutPort !== undefined && requestWithoutPort === registeredWithoutPort;
 }
-// #@range_end(loopback-redirect-uri-match)
 
 /** ポートを除いた元の文字列を返す。対象のループバック表記でなければundefined。 */
-// #@range_begin(loopback-port-removal) ※書籍掲載用の範囲マーカー
 function removeLoopbackPort(uri: string): string | undefined {
 	// [SECURITY] スキームの大小文字は受付時だけ区別せず、比較には元の表記を残す。
 	const prefix = uri.match(/^https?:\/\/(?:127\.0\.0\.1|\[::1\])/i)?.[0];
@@ -127,7 +124,6 @@ function removeLoopbackPort(uri: string): string | undefined {
 	}
 	return prefix + pathAndQuery;
 }
-// #@range_end(loopback-port-removal)
 
 /**
  * URIのスキーム部（RFC 3986 §3.1）を取り出す。
@@ -175,7 +171,6 @@ export function isReverseDomainScheme(uri: string): boolean {
  * @param uri 検証対象のURI
  * @returns 許可されたスキームの場合true
  */
-// #@range_begin(allowed-redirect-uri-scheme) ※書籍掲載用の範囲マーカー
 export function isAllowedRedirectUriScheme(uri: string): boolean {
 	// カスタムURLスキームの場合
 	if (isPrivateUseScheme(uri)) {
@@ -200,7 +195,6 @@ export function isAllowedRedirectUriScheme(uri: string): boolean {
 		return false;
 	}
 }
-// #@range_end(allowed-redirect-uri-scheme)
 
 /**
  * redirect_uriの総合的な検証（登録済みURIとの一致検証）。

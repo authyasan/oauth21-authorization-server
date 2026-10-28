@@ -240,7 +240,6 @@ export type AuthorizationCodeExchangeResult =
  * @param params.client クライアント設定
  * @returns 成功時は発行トークン、失敗時は invalid_grant
  */
-// #@range_begin(exchange-authorization-code) ※書籍掲載用の範囲マーカー
 export async function exchangeAuthorizationCode(params: {
 	codeRecord: AuthorizationCodeRecord;
 	client: ClientConfig;
@@ -282,4 +281,3 @@ export async function exchangeAuthorizationCode(params: {
 
 	return { type: "invalid_grant" };
 }
-// #@range_end(exchange-authorization-code)

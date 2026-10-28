@@ -36,7 +36,6 @@ const AUTHORIZATION_CODE_BYTES = 32;
  * @param params 認可コードに紐づくパラメータ
  * @returns 平文の認可コード（クライアントに返す値）
  */
-// #@range_begin(issue-authorization-code) ※書籍掲載用の範囲マーカー
 export async function issueAuthorizationCode(params: {
 	clientId: string;
 	userId: string;
@@ -80,4 +79,3 @@ export async function issueAuthorizationCode(params: {
 	// 平文コードをクライアントに返す
 	return code;
 }
-// #@range_end(issue-authorization-code)

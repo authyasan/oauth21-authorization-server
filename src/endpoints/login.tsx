@@ -64,7 +64,6 @@ export function createLoginEndpoint() {
 
 	// POST /login: ログイン処理
 	app.post("/login", async (c) => {
-		// #@range_begin(login-csrf-check) ※書籍掲載用の範囲マーカー
 		const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 		const session = sessionId ? getSession(sessionId) : null;
 		const body = await c.req.parseBody({ all: true });
@@ -72,7 +71,6 @@ export function createLoginEndpoint() {
 		if (!sessionId || !session || !validateCsrfToken(session, body.csrfToken)) {
 			return c.html(<ErrorPage />, 403);
 		}
-		// #@range_end(login-csrf-check)
 		const { username, password, txnId } = body;
 		if (
 			txnId !== undefined &&

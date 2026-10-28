@@ -40,7 +40,6 @@ export interface VerifiedAuthorizationCode {
  *
  * @returns 検証成功時はコードレコード、失敗時はnull
  */
-// #@range_begin(verify-authorization-code) ※書籍掲載用の範囲マーカー
 export async function verifyAuthorizationCode(params: {
 	code: string;
 	clientId: string;
@@ -87,4 +86,3 @@ export async function verifyAuthorizationCode(params: {
 
 	return { codeRecord };
 }
-// #@range_end(verify-authorization-code)

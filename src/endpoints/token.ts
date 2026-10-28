@@ -277,7 +277,6 @@ async function handleRefreshTokenGrant(c: Context, body: TokenRequest, client: C
 		requestedScope,
 	});
 
-	// #@range_begin(refresh-token-grant) ※書籍掲載用の範囲マーカー
 	// [SECURITY] リフレッシュトークンを消費し、
 	// 新しいアクセストークンとリフレッシュトークンを発行する。消費できなかった場合は
 	// 猶予窓・再利用・期限切れに分類され、再利用なら grant 全体が失効する。
@@ -299,7 +298,6 @@ async function handleRefreshTokenGrant(c: Context, body: TokenRequest, client: C
 	if (result.type === "invalid_scope") {
 		return tokenErrorResponse(c, invalidScope("The requested scope exceeds the original grant"));
 	}
-	// #@range_end(refresh-token-grant)
 
 	// ローテーションした新しいリフレッシュトークンを返す。
 	// クライアントは古いほうを破棄する（draft-16 §4.3.2）。

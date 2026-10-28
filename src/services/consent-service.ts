@@ -43,7 +43,6 @@ function allowsConsentReuse(redirectUri: string): boolean {
  * @param redirectUri 検証済みの、今回使用するリダイレクトURI
  * @returns 同意画面を省略できる場合true
  */
-// #@range_begin(has-valid-consent) ※書籍掲載用の範囲マーカー
 export async function canSkipConsent(
 	userId: string,
 	clientId: string,
@@ -65,7 +64,6 @@ export async function canSkipConsent(
 
 	return requestedScopes.every((scope) => consentedScopes.has(scope));
 }
-// #@range_end(has-valid-consent)
 
 /**
  * 同意を記録する。

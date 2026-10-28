@@ -104,7 +104,6 @@ export async function findRefreshTokenByHash(
  * [SECURITY] 消費と発行のトランザクション境界を揃えるため、引数は Transaction を必須にする
  * （`consumeAuthorizationCodeIfFresh` と同じ規律）。
  */
-// #@range_begin(consume-refresh-token) ※書籍掲載用の範囲マーカー
 export async function consumeRefreshTokenIfFresh(
 	refreshTokenId: string,
 	tx: Transaction,
@@ -124,7 +123,6 @@ export async function consumeRefreshTokenIfFresh(
 
 	return result.length === 1;
 }
-// #@range_end(consume-refresh-token)
 
 /**
  * 消費できなかったリフレッシュトークンの状態。
@@ -156,7 +154,6 @@ export type RefreshTokenState = "revoked" | "reused" | "in_grace" | "expired" | 
  * [SECURITY] 分類から猶予窓の処理までを同じ grant 行ロックの区間に収めるため、
  * 引数は Transaction を必須にする。
  */
-// #@range_begin(classify-refresh-token) ※書籍掲載用の範囲マーカー
 export async function classifyRefreshToken(
 	refreshTokenId: string,
 	graceSeconds: number,
@@ -186,7 +183,6 @@ export async function classifyRefreshToken(
 	}
 	return row.expired ? "expired" : "not_found";
 }
-// #@range_end(classify-refresh-token)
 
 /**
  * grant 配下の生きたリフレッシュトークンを失効させる。

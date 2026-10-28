@@ -39,7 +39,6 @@ export async function findConsent(
  * @param clientId クライアントID
  * @param scope 同意したスコープ（スペース区切り）
  */
-// #@range_begin(save-consent) ※書籍掲載用の範囲マーカー
 export async function saveConsent(userId: string, clientId: string, scope: string): Promise<void> {
 	// [SECURITY] 1文の INSERT ... ON CONFLICT で上書きする。削除してから挿入する2文では、
 	// 並行する承認がそれぞれ挿入して行が重複し、同意画面の省略判定がどの行を見るか不定になる。
@@ -51,4 +50,3 @@ export async function saveConsent(userId: string, clientId: string, scope: strin
 			set: { scope, createdAt: sql`now()` },
 		});
 }
-// #@range_end(save-consent)

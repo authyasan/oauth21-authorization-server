@@ -39,7 +39,6 @@ export interface VerifiedRefreshToken {
  *
  * @returns 見つかり、かつクライアントが一致すればトークンレコード。それ以外は null
  */
-// #@range_begin(verify-refresh-token) ※書籍掲載用の範囲マーカー
 export async function verifyRefreshToken(params: {
 	refreshToken: string;
 	clientId: string;
@@ -68,7 +67,6 @@ export async function verifyRefreshToken(params: {
 
 	return { tokenRecord };
 }
-// #@range_end(verify-refresh-token)
 
 /**
  * リフレッシュトークンのローテーション結果。
@@ -121,7 +119,6 @@ class ScopeExceededSignal extends Error {}
  * @param params.requestedScope リクエストの scope パラメータ。
  *   省略時は grant のスコープとして扱う（draft-16 §4.3.1）。
  */
-// #@range_begin(rotate-refresh-token) ※書籍掲載用の範囲マーカー
 export async function rotateRefreshToken(params: {
 	tokenRecord: RefreshTokenRecord;
 	client: ClientConfig;
@@ -285,4 +282,3 @@ async function issueTokens(
 
 	return token;
 }
-// #@range_end(rotate-refresh-token)

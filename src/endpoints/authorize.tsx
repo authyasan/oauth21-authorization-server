@@ -76,13 +76,11 @@ export function createAuthorizeEndpoint() {
 		}
 
 		const session = getSession(sessionId);
-		// #@range_begin(consent-csrf-check) ※書籍掲載用の範囲マーカー
 		const body = await c.req.parseBody({ all: true });
 		// [SECURITY] 承認・拒否のどちらも、保存データを消費する前にCSRFトークンを照合する。
 		if (!session || !validateCsrfToken(session, body.csrfToken)) {
 			return c.html(<ErrorPage />, 403);
 		}
-		// #@range_end(consent-csrf-check)
 		if (!session?.userId) {
 			logger.warn("POST /authorize: 未ログインのためエラー");
 			return c.html(<ErrorPage />, 400);

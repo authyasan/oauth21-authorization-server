@@ -49,7 +49,6 @@ export function saveAuthorizationRequest(
  * txnId を使って保存済みの認可リクエストを取得する（取得成功時は削除しない）。
  * 存在しない、期限切れ、boundSid 不一致の場合は null を返す。
  */
-// #@range_begin(get-authorization-request) ※書籍掲載用の範囲マーカー
 export function getAuthorizationRequest(
 	txnId: string,
 	currentSid: string,
@@ -75,7 +74,6 @@ export function getAuthorizationRequest(
 
 	return stored.authorizationRequest;
 }
-// #@range_end(get-authorization-request)
 
 /**
  * 保存済みの認可リクエストを取得し、成功した場合だけ即座に削除する。

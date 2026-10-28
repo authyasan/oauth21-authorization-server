@@ -111,7 +111,6 @@ export function updateSession(
 }
 
 /** セッションに保存したCSRFトークンとフォームの値を照合する。 */
-// #@range_begin(validate-csrf-token) ※書籍掲載用の範囲マーカー
 export function validateCsrfToken(session: SessionData | null, token: unknown): boolean {
 	// [SECURITY] 欠落・重複（配列）・Fileなどの型不正を拒否する。
 	// 32バイトのbase64urlに限定し、文字列比較には既存の定数時間比較を使う。
@@ -120,7 +119,6 @@ export function validateCsrfToken(session: SessionData | null, token: unknown): 
 	}
 	return constantTimeEqual(session.csrfToken, token);
 }
-// #@range_end(validate-csrf-token)
 
 /**
  * セッションを削除する（ログアウト）。

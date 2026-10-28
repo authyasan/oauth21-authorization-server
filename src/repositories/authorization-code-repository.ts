@@ -118,7 +118,6 @@ export async function findAuthorizationCodeById(
  * @param tx トランザクションハンドル（必須。db.transaction のコールバック内から渡す）
  * @returns このリクエストが消費に成功したら true、先を越された／期限切れなら false
  */
-// #@range_begin(consume-authorization-code) ※書籍掲載用の範囲マーカー
 export async function consumeAuthorizationCodeIfFresh(
 	codeId: string,
 	tx: Transaction,
@@ -137,4 +136,3 @@ export async function consumeAuthorizationCodeIfFresh(
 
 	return result.length === 1;
 }
-// #@range_end(consume-authorization-code)

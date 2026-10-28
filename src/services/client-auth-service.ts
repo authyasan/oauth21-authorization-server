@@ -53,7 +53,6 @@ const AUTH_FAILURE: ClientAuthResult = {
  * @param bodyClientSecret リクエストボディのclient_secret
  * @returns 判別可能な認証結果（success / failure）
  */
-// #@range_begin(authenticate-client) ※書籍掲載用の範囲マーカー
 export function authenticateClient(
 	authorizationHeader: string | undefined,
 	bodyClientId: string | undefined,
@@ -112,7 +111,6 @@ export function authenticateClient(
 
 	return { type: "success", client, authMethod: "none" };
 }
-// #@range_end(authenticate-client)
 
 /**
  * client_secret_basic認証。
@@ -120,7 +118,6 @@ export function authenticateClient(
  * RFC 6749 §2.3.1 のフォーム符号化を戻す。
  * Authorization: Basic base64(formEncode(client_id):formEncode(client_secret))
  */
-// #@range_begin(authenticate-basic) ※書籍掲載用の範囲マーカー
 function authenticateBasic(encoded: string): ClientAuthResult {
 	// [SECURITY] RFC 9110 §11.2: token68内の空白をBase64デコーダに無視させない。
 	if (!/^[A-Za-z0-9._~+/-]+=*$/.test(encoded) || /[\r\n]/.test(encoded)) {
@@ -152,7 +149,6 @@ function authenticateBasic(encoded: string): ClientAuthResult {
 
 	return verifyClientSecret(clientId, clientSecret, "client_secret_basic");
 }
-// #@range_end(authenticate-basic)
 
 /**
  * client_secret_post認証。
@@ -175,7 +171,6 @@ function authenticatePost(
  * [SECURITY] 定数時間比較でclient_secretを検証する。
  * 通常の文字列比較(===)はタイミング攻撃に脆弱。
  */
-// #@range_begin(verify-client-secret) ※書籍掲載用の範囲マーカー
 function verifyClientSecret(
 	clientId: string,
 	clientSecret: string,
@@ -220,4 +215,3 @@ function verifyClientSecret(
 
 	return { type: "success", client, authMethod: method };
 }
-// #@range_end(verify-client-secret)
