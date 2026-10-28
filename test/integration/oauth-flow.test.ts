@@ -1226,19 +1226,45 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(body.error).toBe("invalid_request");
 		});
 
-		it("未知の token_type_hint でもエラーにならない", async () => {
+		it("未知の token_type_hint は無視し、両方の種類を探索してリボークする", async () => {
+			// 未知のヒントはアクセストークンから探すので、リフレッシュトークンで
+			// もう一方への探索まで進むことを確かめる
+			const { refreshToken } = await obtainTokens();
+
 			const res = await request("/revoke", {
 				method: "POST",
-				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+					Authorization: basicAuthHeader(
+						TEST_CONFIDENTIAL_CLIENT.clientId,
+						TEST_CONFIDENTIAL_CLIENT.clientSecret,
+					),
+				},
 				body: formBody({
-					token: "some-token",
+					token: refreshToken,
 					token_type_hint: "unknown_type",
-					client_id: TEST_PUBLIC_CLIENT.clientId,
 				}),
 			});
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Cache-Control")).toBe("no-store");
 			expect(res.headers.get("Pragma")).toBeNull();
+
+			const refreshRes = await request("/token", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+					Authorization: basicAuthHeader(
+						TEST_CONFIDENTIAL_CLIENT.clientId,
+						TEST_CONFIDENTIAL_CLIENT.clientSecret,
+					),
+				},
+				body: formBody({
+					grant_type: "refresh_token",
+					refresh_token: refreshToken,
+				}),
+			});
+			expect(refreshRes.status).toBe(400);
+			expect((await refreshRes.json()).error).toBe("invalid_grant");
 		});
 
 		it("エラー時にも Cache-Control: no-store が設定される", async () => {
@@ -2301,8 +2327,18 @@ describe("OAuth 2.1 結合テスト", () => {
 					codeChallenge,
 				}),
 			);
-			const otherSidMatch = otherRes.headers.get("Set-Cookie")?.match(/sid=([^;]+)/);
-			const otherCookie = `sid=${otherSidMatch?.[1]}`;
+			// Cookie を取れなければ「セッションなし」の経路で 400 になり、不一致を確かめられない
+			const otherSid = otherRes.headers.get("Set-Cookie")?.match(/sid=([^;]+)/)?.[1];
+			expect(otherSid).toBeTruthy();
+			const otherCookie = `sid=${otherSid}`;
+
+			// 対照: 別セッション自身の txnId なら引ける（未ログインなのでログイン画面へ）
+			const ownRes = await request(
+				`/authorize?txnId=${encodeURIComponent(extractTxnIdFromLocation(otherRes))}`,
+				{ headers: { Cookie: otherCookie } },
+			);
+			expect(ownRes.status).toBe(302);
+			expect(ownRes.headers.get("location")).toMatch(/^\/login\?txnId=/);
 
 			const res = await request(`/authorize?txnId=${encodeURIComponent(txnId)}`, {
 				headers: { Cookie: otherCookie },
@@ -2844,7 +2880,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(body.error).toBe("unsupported_grant_type");
 		});
 
-		it("有効期限切れの認可コードでトークン交換するとエラーになる（B-7）", async () => {
+		it("有効期限切れの認可コードでトークン交換するとエラーになる", async () => {
 			const { codeVerifier, codeChallenge } = generatePkce();
 
 			// 認可フローで認可コードを取得

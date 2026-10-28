@@ -277,8 +277,11 @@ describe("validateAuthorizationRequest", () => {
 		it("stateの長さに制限はない", () => {
 			const longState = "a".repeat(2000);
 			const result = validateAuthorizationRequest(validParams({ state: longState }));
-			// stateの長さでエラーにならないことを確認
-			expect(result.type).not.toBe("redirect_error");
+			// エラー画面にもリダイレクトエラーにもならず、値をそのまま保持する
+			expect(result.type).toBe("success");
+			if (result.type === "success") {
+				expect(result.authorizationRequest.state).toBe(longState);
+			}
 		});
 	});
 

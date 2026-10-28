@@ -23,7 +23,6 @@ import {
 import type { ClientConfig } from "../types/client.js";
 import type { AuthorizationRequest } from "../types/oauth.js";
 import { logger } from "../utils/logger.js";
-import { parseScope } from "../utils/validation.js";
 import { ConsentPage } from "../views/consent.js";
 import { ErrorPage } from "../views/error.js";
 
@@ -297,7 +296,7 @@ function renderConsentPage(
 		<ConsentPage
 			clientName={client.clientName}
 			organizationName={client.organizationName}
-			scopes={parseScope(authorizationRequest.scope)}
+			scopes={authorizationRequest.scope.split(" ")}
 			txnId={txnId}
 			csrfToken={csrfToken}
 		/>,

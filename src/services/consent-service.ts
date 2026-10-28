@@ -1,6 +1,5 @@
 import { BlockList, isIP } from "node:net";
 import { findConsent, saveConsent } from "../repositories/consent-repository.js";
-import { parseScope } from "../utils/validation.js";
 
 /**
  * 同意サービス。
@@ -61,8 +60,8 @@ export async function canSkipConsent(
 	}
 
 	// リクエストされたスコープがすべて過去の同意に含まれているか
-	const requestedScopes = parseScope(requestedScope);
-	const consentedScopes = new Set(parseScope(existing.scope));
+	const requestedScopes = requestedScope.split(" ");
+	const consentedScopes = new Set(existing.scope.split(" "));
 
 	return requestedScopes.every((scope) => consentedScopes.has(scope));
 }

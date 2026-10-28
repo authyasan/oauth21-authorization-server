@@ -30,29 +30,12 @@ export function validateRedirectUri(requestUri: string, registeredUris: string[]
 }
 
 /**
- * スコープ文字列をパースして個々のスコープに分割する。
- * RFC 6749 Section 3.3: scope = scope-token *( SP scope-token )
- *
- * @param scopeString スペース区切りのスコープ文字列
- * @returns スコープの配列（空文字列の場合は空配列）
- */
-export function parseScope(scopeString: string): string[] {
-	if (!scopeString || scopeString.trim() === "") {
-		return [];
-	}
-	return scopeString
-		.trim()
-		.split(/\s+/)
-		.filter((s) => s.length > 0);
-}
-
-/**
  * scopeパラメータが構文に従うか検証する。
  * OAuth 2.1 draft-16 §1.4.1: scope = scope-token *( SP scope-token )
  *   scope-token = 1*( %x21 / %x23-5B / %x5D-7E )
  *
- * [SECURITY] 空白の正規化（trimや任意の空白での分割）より前に検証し、
- * 不正な入力を補正して受け入れない。
+ * [SECURITY] 空白を補正（trimや任意の空白での分割）せずに検証し、
+ * 不正な入力を受け入れない。通過した値は半角スペース1つで区切られている。
  * (?![\s\S]) は入力末尾。末尾改行の前にも一致する $ は使わない。
  */
 export function isValidScopeSyntax(scope: string): boolean {

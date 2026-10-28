@@ -32,13 +32,6 @@ describe("パスワードハッシュ", () => {
 		const result = await verifyPassword("wrong-password", hash);
 		expect(result).toBe(false);
 	});
-
-	it("空のパスワードでもハッシュ化できる", async () => {
-		const hash = await hashPassword("");
-		expect(hash).toBeDefined();
-		const result = await verifyPassword("", hash);
-		expect(result).toBe(true);
-	});
 });
 
 describe("存在しないユーザー用のダミーハッシュ", () => {

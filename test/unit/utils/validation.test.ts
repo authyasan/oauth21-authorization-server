@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
 	isExactRedirectUriMatch,
 	isValidScopeSyntax,
-	parseScope,
 	validateRedirectUri,
 } from "../../../src/utils/validation.js";
 
@@ -61,32 +60,6 @@ describe("validateRedirectUri", () => {
 
 	it("空の登録URIリストに対してはfalse", () => {
 		expect(validateRedirectUri("http://localhost:8080/callback", [])).toBe(false);
-	});
-});
-
-describe("parseScope", () => {
-	it("スペース区切りのスコープを分割する", () => {
-		expect(parseScope("read write")).toEqual(["read", "write"]);
-	});
-
-	it("単一スコープ", () => {
-		expect(parseScope("read")).toEqual(["read"]);
-	});
-
-	it("複数スペースを正しく処理する", () => {
-		expect(parseScope("read  write   admin")).toEqual(["read", "write", "admin"]);
-	});
-
-	it("空文字列は空配列を返す", () => {
-		expect(parseScope("")).toEqual([]);
-	});
-
-	it("空白のみの場合は空配列を返す", () => {
-		expect(parseScope("   ")).toEqual([]);
-	});
-
-	it("前後の空白をトリムする", () => {
-		expect(parseScope(" read write ")).toEqual(["read", "write"]);
 	});
 });
 

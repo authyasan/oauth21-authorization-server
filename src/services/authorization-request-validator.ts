@@ -167,7 +167,7 @@ export function validateAuthorizationRequest(params: URLSearchParams): Validatio
 	}
 
 	// scopeに未登録値が含まれる場合は全体エラー
-	// [SECURITY] draft-16 §1.4.1のscope構文を、空白の正規化より前に検証する。
+	// [SECURITY] draft-16 §1.4.1のscope構文で検証し、空白を補正して受け入れない。
 	if (!isValidScopeSyntax(scopeString)) {
 		return redirectError("invalid_scope", "Invalid scope syntax");
 	}
