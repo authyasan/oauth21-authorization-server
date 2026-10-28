@@ -26,6 +26,24 @@ OAuth 2.1 準拠の認可サーバー参考実装。
 
 書籍内のサンプル実装のコード抜粋は、このリポジトリの `src/` と `scripts/` から引用されています。
 
+エンドポイントの振る舞い、保存方法、主な設計意図は[サンプル実装の機能と設計](サンプル実装の機能と設計.md)を参照してください。
+
+## サンプルコードの取得と版の選択
+
+Gitを用意し、次のコマンドで取得します。WindowsではWSL2のターミナルで、Linux側のホームディレクトリに配置してください。
+
+```bash
+git clone https://github.com/authyasan/oauth21-authorization-server.git
+cd oauth21-authorization-server
+```
+
+現在は刊行前の準備版です。上巻対応タグ`upper-v1.0.0`は未作成です。
+<!-- TODO(RELEASE): タグ作成後、対応版と実際のgit switch --detachコマンドを掲載し、未ログインで取得手順を検証する。 -->
+
+対応版の公開後は、取得したREADMEで案内するタグを選び、`git switch --detach タグ名`で切り替えてから起動してください。`detached HEAD`は特定の版を選んだ状態であり、動作確認には問題ありません。刊行後の修正版も新しいタグで案内します。既存のタグは付け替えません。
+
+版を切り替えると手元のREADMEもその版に戻ります。取得後の修正版の案内は、[GitHub上のリポジトリのトップページ](https://github.com/authyasan/oauth21-authorization-server)で確認してください。
+
 ## Dockerで試す
 
 ### 前提
@@ -35,7 +53,7 @@ OAuth 2.1 準拠の認可サーバー参考実装。
 - ホストのTCPポート3000が空いていること
 
 コマンドはリポジトリのルートで実行します。Node.jsとPostgreSQLはコンテナ内で動作するため、ホストへのインストールや`.env`の作成は不要です。
-macOSのOrbStackで動作確認しています。WindowsではWSL2とLinuxコンテナを利用する構成を想定していますが、Windowsでの動作確認は未実施です。
+macOS 26.5.2上のOrbStack 2.2.5で動作確認しています。WindowsではWSL2とLinuxコンテナを利用する構成を想定していますが、Windowsでの動作確認は未実施です。
 WSL2では、リポジトリをLinux側のホームディレクトリ（例: `~/`）にクローンして作業してください。
 PostgreSQLの使用バージョンは`compose.quickstart.yaml`、Node.jsの使用バージョンは`Dockerfile`を参照してください。
 
@@ -57,7 +75,9 @@ DBスキーマの適用は初回の空DBを対象とした手順であり、バ�
 | testuser | password123 |
 | admin | admin123 |
 
-上記は教材用の固定値です。実際のアカウント情報を投入したり、インターネットへ公開したりしないでください。クライアント設定は`src/config/clients.json`にあり、クライアントアプリやリソースサーバーはこの構成には含みません。
+上記のパスワードと付属のクライアントシークレットは公開された固定値です。実際のサービスへ流用しないでください。クライアント設定は`src/config/clients.json`にあり、クライアントアプリやリソースサーバーはこの構成には含みません。
+
+付属のDocker構成は手元での動作確認用です。クラウド上で動かす場合は、接続元を限定するなど、第三者がアクセスできない環境を用意してください。インターネットへ公開するための構成や運用上の対策は、この手順の説明範囲外です。
 
 ### 停止と再開
 
@@ -66,7 +86,7 @@ docker compose -f compose.quickstart.yaml down
 docker compose -f compose.quickstart.yaml up -d --wait app
 ```
 
-DBは`oauth21-quickstart_database`、署名鍵は`oauth21-quickstart_signing_keys`というDockerボリュームに保存します（既定のプロジェクト名を使う場合）。通常の停止・再開では保持され、初期化や鍵の再生成は行いません。`down -v`は両方を削除するため、データを残したい場合は実行しないでください。
+DBは`oauth21-quickstart_database`、署名鍵は`oauth21-quickstart_signing_keys`というDockerボリュームに保存します（既定のプロジェクト名を使う場合）。通常の停止・再開では保持され、初期化や鍵の再生成は行いません。メモリ上のログインセッションは停止すると失われるため、認可コードの取得を再び試す場合はログインからやり直します。
 
 ログの確認には次を使います。
 
@@ -74,8 +94,26 @@ DBは`oauth21-quickstart_database`、署名鍵は`oauth21-quickstart_signing_key
 docker compose -f compose.quickstart.yaml logs app
 ```
 
+リクエストを送りながらログを見る場合は、別のターミナルで次を実行します。`Ctrl+C`でログの表示を終了しても、認可サーバーは停止しません。
+
+```bash
+docker compose -f compose.quickstart.yaml logs -f app
+```
+
 コードや設定ファイルを編集した場合は、`up -d --build --wait app`でイメージを再ビルドしてください。ホストの編集内容を自動で取り込む構成ではありません。
 アプリのポートはホストの`127.0.0.1:3000`にのみ公開し、DBのポートはホストに公開しません。
+
+### 初期状態からやり直す
+
+次の操作はDBのデータと署名鍵を削除します。ユーザー、同意記録、認可コードやトークンの記録も失われるため、残したいデータや鍵がある場合は実行しないでください。手元のソースコードと設定ファイルは残ります。
+
+```bash
+docker compose -f compose.quickstart.yaml down --volumes
+docker compose -f compose.quickstart.yaml run --rm --build setup
+docker compose -f compose.quickstart.yaml up -d --build --wait app
+```
+
+新しい署名鍵とDBが作成されます。動作確認は認可コードの取得からやり直してください。
 
 ## ホストのNode.jsで開発する場合
 
