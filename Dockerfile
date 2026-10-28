@@ -3,6 +3,7 @@ FROM node:26.12.1-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY tsconfig.json drizzle.config.ts biome.json vitest.config.ts ./
 COPY src/ ./src/
 COPY test/unit/ ./test/unit/
