@@ -2,7 +2,7 @@
 	{
 		"clientId": "public-spa-client",
 		"clientName": "サンプルSPAアプリ",
-		"organizationName": "サンプル開発元",
+		"organizationName": "サンプル開発会社",
 		"clientType": "public",
 		"redirectUris": ["http://127.0.0.1:8080/callback"],
 		"allowedScopes": ["read", "write"]
@@ -10,7 +10,7 @@
 	{
 		"clientId": "confidential-backend-client",
 		"clientName": "サンプルバックエンドアプリ",
-		"organizationName": "サンプル開発元",
+		"organizationName": "サンプル開発会社",
 		"clientType": "confidential",
 		"clientSecretHash": "8ac950188678f9bb3524b275130332b511bf5092394da6975b5fb9e84302f026",
 		"redirectUris": ["http://127.0.0.1:8081/callback"],
