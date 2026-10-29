@@ -119,9 +119,12 @@ export function authenticateClient(
  * Authorization: Basic base64(formEncode(client_id):formEncode(client_secret))
  */
 function authenticateBasic(encoded: string): ClientAuthResult {
-	// [SECURITY] RFC 9110 §11.2: token68内の空白をBase64デコーダに無視させない。
-	if (!/^[A-Za-z0-9._~+/-]+=*$/.test(encoded) || /[\r\n]/.test(encoded)) {
-		logger.warn("クライアント認証: Basic認証のtoken68が不正");
+	// [SECURITY] RFC 7617 §2 が指定する RFC 4648 §4 の Base64 だけを受け付ける。
+	// Buffer.from は文字集合外の文字（token68 に含まれる「.」「~」や空白など）や
+	// 過不足のあるパディングを黙って読み飛ばすため、デコードの前に検証する（RFC 4648 §3.2・§3.3）。
+	// パディングの前の余りのビットが0かどうか（§3.5、MAY）までは確かめない。
+	if (!isStandardBase64(encoded)) {
+		logger.warn("クライアント認証: Basic認証の認証情報が標準のBase64ではない");
 		return AUTH_FAILURE;
 	}
 	let decoded: string;
@@ -148,6 +151,18 @@ function authenticateBasic(encoded: string): ClientAuthResult {
 	}
 
 	return verifyClientSecret(clientId, clientSecret, "client_secret_basic");
+}
+
+/**
+ * 空でない、パディング付きの標準Base64（RFC 4648 §4）か。
+ * 4文字単位で、最後の単位だけが末尾の「=」1〜2文字を持てる。
+ * (?![\s\S]) は入力末尾。末尾改行の前にも一致する $ は使わない。
+ */
+function isStandardBase64(value: string): boolean {
+	return (
+		value !== "" &&
+		/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![\s\S])/.test(value)
+	);
 }
 
 /**

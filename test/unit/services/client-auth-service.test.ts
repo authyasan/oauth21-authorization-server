@@ -110,6 +110,38 @@ describe("authenticateClient", () => {
 			}
 		});
 
+		describe("標準Base64（RFC 4648 §4）以外の認証情報", () => {
+			// 正しい認証情報。46バイトなので末尾に「==」が付く
+			const valid = Buffer.from("confidential-backend-client:test-client-secret").toString(
+				"base64",
+			);
+
+			it.each([
+				// 4文字単位を保ったまま、デコーダが読み飛ばす文字を差し込む
+				["「.」の挿入", `${valid.slice(0, 8)}....${valid.slice(8)}`],
+				["「~」の挿入", `${valid.slice(0, 8)}~~~~${valid.slice(8)}`],
+				["パディングの欠落", valid.slice(0, -2)],
+				["パディングの過剰", `${valid}=`],
+				["パディングの後の文字", `${valid}AAAA`],
+				["末尾の改行", `${valid}\n`],
+			])("%sは、正しい認証情報を含んでいても拒否する", (_name, credentials) => {
+				expect(authenticateClient(`Basic ${credentials}`, undefined, undefined)).toMatchObject({
+					type: "failure",
+					errorCode: "invalid_client",
+				});
+			});
+
+			it("不正なBase64でも、方式の同時送信は先にinvalid_requestにする", () => {
+				expect(
+					authenticateClient(
+						`Basic ${valid.slice(0, 8)}....${valid.slice(8)}`,
+						"confidential-backend-client",
+						"test-client-secret",
+					),
+				).toMatchObject({ type: "failure", errorCode: "invalid_request" });
+			});
+		});
+
 		it.each([
 			["クライアントID側", "confidential-backend-client%E0%A4%A:test-client-secret"],
 			["シークレット側", "confidential-backend-client:%E0%A4%A"],
