@@ -36,6 +36,7 @@ test("ログイン→同意→callback→トークン交換まで通り、ログ
 
 	await submitLogin(page);
 	await expect(page.locator("button.approve")).toBeVisible();
+	await expect(page.locator(".current-user")).toHaveText("ログイン中のユーザー: testuser");
 
 	// ログインでセッションIDが作り直され、新しいセッションで認可フローが続いている。
 	const after = await sessionCookie(context);
@@ -62,6 +63,56 @@ test("ログイン→同意→callback→トークン交換まで通り、ログ
 	expect(body.token_type).toBe("Bearer");
 	expect(body.access_token).toBeTruthy();
 	expect(body.scope).toBe("read");
+});
+
+test("別タブで別ユーザーがログインすると古い同意は拒否され、再読込後に現在のユーザー名が表示される", async ({
+	page,
+	context,
+	request,
+}) => {
+	await page.goto(authorizeUrl({ challenge: pkce().challenge }));
+	await submitLogin(page);
+	await expect(page.locator(".current-user")).toHaveText("ログイン中のユーザー: testuser");
+	const consentUrl = page.url();
+	const other = await context.newPage();
+	// ログイン済みGET /loginはフォームを省略するため、現在のセッションのCSRFでPOSTする。
+	const csrfToken = await page.locator('input[name="csrfToken"]').first().inputValue();
+	await other.goto(consentUrl);
+	const login = other.waitForResponse(
+		(r) => r.url() === `${AS_ORIGIN}/login` && r.request().method() === "POST",
+	);
+	await other.evaluate((csrfToken) => {
+		const form = document.createElement("form");
+		form.method = "post";
+		form.action = "/login";
+		for (const [name, value] of Object.entries({
+			username: "other-user",
+			password: "password123",
+			csrfToken,
+		})) {
+			const input = document.createElement("input");
+			input.name = name;
+			input.value = value;
+			form.append(input);
+		}
+		document.body.append(form);
+		form.submit();
+	}, csrfToken);
+	expect((await login).status()).toBe(303);
+	await other.waitForURL(`${AS_ORIGIN}/`);
+	await other.goto(consentUrl);
+	await expect(other.locator(".current-user")).toHaveText("ログイン中のユーザー: other-user");
+	const rejected = page.waitForResponse(
+		(r) => r.url() === `${AS_ORIGIN}/authorize` && r.request().method() === "POST",
+	);
+	await page.click("button.approve");
+	expect((await rejected).status()).toBe(403);
+	expect(await callbacks(request)).toHaveLength(0);
+	await page.goto(consentUrl);
+	await expect(page.locator(".current-user")).toHaveText("ログイン中のユーザー: other-user");
+	await page.click("button.approve");
+	await expect(page.locator("#callback")).toBeVisible();
+	expect(await callbacks(request)).toHaveLength(1);
 });
 
 test("同意画面で拒否すると access_denied が callback に届く", async ({ page, request }) => {

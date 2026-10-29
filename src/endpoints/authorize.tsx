@@ -6,6 +6,7 @@ import { serverConfig } from "../config/server.js";
 import { OAuthError } from "../errors/oauth-error.js";
 import { SESSION_COOKIE_NAME, setSessionCookie } from "../middleware/auth.js";
 import { findClientById } from "../repositories/client-repository.js";
+import { findUserById } from "../repositories/user-repository.js";
 import { issueAuthorizationCode } from "../services/authorization-code-service.js";
 import {
 	consumeAuthorizationRequest,
@@ -211,7 +212,7 @@ async function startAuthorization(
 		return c.redirect(`/login?txnId=${encodeURIComponent(txnId)}`, 302);
 	}
 
-	return renderConsentPage(c, client, authorizationRequest, txnId, session.csrfToken);
+	return renderConsentPage(c, client, authorizationRequest, txnId, session.csrfToken, userId);
 }
 
 /**
@@ -277,21 +278,26 @@ async function resumeAuthorization(
 		logger.error("GET /authorize: 保存した認可リクエストのクライアントが見つかりません");
 		return c.html(<ErrorPage />, 400);
 	}
-	return renderConsentPage(c, client, authorizationRequest, txnId, session.csrfToken);
+	return renderConsentPage(c, client, authorizationRequest, txnId, session.csrfToken, userId);
 }
 
 /**
  * 同意画面を表示する。承認・拒否は POST /authorize で受け取る。
  */
-function renderConsentPage(
+async function renderConsentPage(
 	c: Context,
 	client: ClientConfig,
 	authorizationRequest: AuthorizationRequest,
 	txnId: string,
 	csrfToken: string,
+	userId: string,
 ) {
+	// [SECURITY] 表示するユーザーは認証済みセッションから決め、リクエストの入力値は使わない。
+	const user = await findUserById(userId);
+	if (!user) return c.html(<ErrorPage />, 400);
 	return c.html(
 		<ConsentPage
+			username={user.username}
 			clientName={client.clientName}
 			organizationName={client.organizationName}
 			scopes={authorizationRequest.scope.split(" ")}

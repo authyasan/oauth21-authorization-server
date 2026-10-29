@@ -186,6 +186,7 @@ control.post("/reset", async (c) => {
 		reset: async () => {
 			await cleanupDatabase();
 			await createTestUser();
+			await createTestUser({ username: "other-user" });
 		},
 	});
 	clearAllSessions();

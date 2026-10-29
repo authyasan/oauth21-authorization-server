@@ -6,6 +6,7 @@
  */
 
 interface ConsentPageProps {
+	username: string;
 	csrfToken: string;
 	clientName: string;
 	/** クライアントを登録した開発者・組織の名前（OAuth 2.1 draft-16 §7.9） */
@@ -16,6 +17,7 @@ interface ConsentPageProps {
 }
 
 export function ConsentPage({
+	username,
 	clientName,
 	organizationName,
 	scopes,
@@ -47,6 +49,11 @@ export function ConsentPage({
 						color: #333;
 						margin-bottom: 8px;
 						font-size: 20px;
+					}
+					.current-user {
+						font-size: 14px;
+						color: #555;
+						overflow-wrap: anywhere;
 					}
 					.client-name {
 						text-align: center;
@@ -111,6 +118,7 @@ export function ConsentPage({
 			<body>
 				<div class="consent-form">
 					<h1>アクセス許可の確認</h1>
+					<p class="current-user">ログイン中のユーザー: {username}</p>
 					<p class="client-name">{clientName}</p>
 					<p class="organization-name">提供元: {organizationName}</p>
 					<p class="description">このアプリケーションが以下の権限を要求しています：</p>
