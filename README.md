@@ -49,10 +49,13 @@ git clone https://github.com/authyasan/oauth21-authorization-server.git
 cd oauth21-authorization-server
 ```
 
-現在は刊行前の準備版です。上巻対応タグ`upper-v1.0.0`は未作成です。
-<!-- TODO(RELEASE): タグ作成後、対応版と実際のgit switch --detachコマンドを掲載し、未ログインで取得手順を検証する。 -->
+本書の認可サーバー編・上巻に対応する版は`upper-v1.0.0`です。次のコマンドで切り替えてから起動してください。
 
-対応版の公開後は、取得したREADMEで案内するタグを選び、`git switch --detach タグ名`で切り替えてから起動してください。`detached HEAD`は特定の版を選んだ状態であり、動作確認には問題ありません。刊行後の修正版も新しいタグで案内します。既存のタグは付け替えません。
+```bash
+git switch --detach upper-v1.0.0
+```
+
+`detached HEAD`は特定の版を選んだ状態であり、動作確認には問題ありません。修正版を公開した場合は、このREADMEで新しいタグを案内します。既存のタグは付け替えません。
 
 版を切り替えると手元のREADMEもその版に戻ります。取得後の修正版の案内は、[GitHub上のリポジトリのトップページ](https://github.com/authyasan/oauth21-authorization-server)で確認してください。
 
