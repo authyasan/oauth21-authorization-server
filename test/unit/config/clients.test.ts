@@ -85,7 +85,7 @@ describe("クライアント設定の読み込み", () => {
 		expect(() => createClientMap([client])).toThrow("どのリソースサーバーにも対応していません");
 	});
 
-	it("クライアントIDの重複は拒否する", () => {
+	it("クライアント識別子の重複は拒否する", () => {
 		const client = clientWithUris(["https://client.example/callback"]);
 		expect(() => createClientMap([client, client])).toThrow("クライアントID重複");
 	});

@@ -1,8 +1,7 @@
 /** @jsxImportSource hono/jsx */
 
 /**
- * ログインページのビュー。
- * Hono JSXによるサーバーサイドレンダリング。
+ * ログインフォームを表示し、認可フローのtxnIdとCSRFトークンをPOSTに引き継ぐ。
  */
 
 interface LoginPageProps {

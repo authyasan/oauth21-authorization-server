@@ -70,7 +70,7 @@ describe("authenticateClient", () => {
 		});
 
 		it.each(["空のBasic", "SPのみ", "タブ区切り", "SPとタブ", "内部SP", "内部タブ"])(
-			"%sを認証なしへ落とさず拒否する",
+			"不正なBasic認証（%s）を無視せず拒否する",
 			(kind) => {
 				const credentials = Buffer.from("confidential-backend-client:test-client-secret").toString(
 					"base64",
@@ -90,9 +90,9 @@ describe("authenticateClient", () => {
 			},
 		);
 
-		it("URLエンコードされたclient_idを正しくデコードする", () => {
-			// client_idに特殊文字が含まれるケースのテスト
-			// 実際のクライアントIDでテスト
+		it("登録済みの認証情報から構築したBasic認証を受け付ける", () => {
+			// 登録済みの認証情報をエンコードしてBasic認証ヘッダーを作る。
+			// この値はエンコードしても変わらないため、特殊文字のデコードは確認していない。
 			const encoded = `${encodeURIComponent("confidential-backend-client")}:${encodeURIComponent("test-client-secret")}`;
 			const credentials = Buffer.from(encoded).toString("base64");
 			const result = authenticateClient(`Basic ${credentials}`, undefined, undefined);
@@ -149,7 +149,7 @@ describe("authenticateClient", () => {
 			["UTF-8として不正なバイト列", "confidential-backend-client:%FF"],
 		])("%sの不正なパーセントエンコードは例外にせず認証失敗にする", (_name, value) => {
 			const credentials = Buffer.from(value).toString("base64");
-			// 本文の client_id（パブリッククライアント）があっても、認証なしへ落とさない
+			// ボディにパブリッククライアントのclient_idがあっても、不正なBasic認証を無視しない。
 			expect(
 				authenticateClient(`Basic ${credentials}`, "public-spa-client", undefined),
 			).toMatchObject({ type: "failure", errorCode: "invalid_client" });
@@ -178,7 +178,7 @@ describe("authenticateClient", () => {
 
 	describe("複数認証方式の同時送信", () => {
 		it.each(["Basic", "bAsIc", "basic", "BASIC"])(
-			"%sとPostの同時送信はinvalid_request",
+			"%sスキームのBasic認証とclient_secret_postを同時に指定するとinvalid_requestを返す",
 			(scheme) => {
 				const credentials = Buffer.from("confidential-backend-client:test-client-secret").toString(
 					"base64",
@@ -197,7 +197,7 @@ describe("authenticateClient", () => {
 	});
 
 	describe("パブリッククライアント", () => {
-		it("client_idのみで認証が成功する（authMethod=none）", () => {
+		it("client_idのみでパブリッククライアントを識別し、authMethod=noneを返す", () => {
 			const result = authenticateClient(undefined, "public-spa-client", undefined);
 			expect(result.type).toBe("success");
 			if (result.type === "success") {

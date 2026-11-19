@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.js";
 
-// postgres.jsクライアントの作成
+// 接続先の指定漏れを起動時に検出する。
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
 	throw new Error("DATABASE_URL環境変数が設定されていません");
@@ -20,7 +20,6 @@ export type Database = typeof db;
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /**
- * クエリ実行体。通常の db ハンドルとトランザクションハンドルの両方を受け付ける。
- * リポジトリ関数がトランザクション内外どちらからも呼べるようにするための型。
+ * リポジトリ関数をトランザクション内外から共通に呼び出すための型。
  */
 export type Executor = Database | Transaction;

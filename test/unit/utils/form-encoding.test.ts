@@ -8,7 +8,7 @@ describe("decodeFormComponent", () => {
 		["「%」（%25）", "a%25b", "a%b"],
 		["マルチバイト文字", "%E3%81%82", "あ"],
 		["符号化のない値", "plain-value", "plain-value"],
-	])("%sを戻す", (_name, input, expected) => {
+	])("フォームのエンコードをデコードする: %s", (_name, input, expected) => {
 		expect(decodeFormComponent(input)).toBe(expected);
 	});
 

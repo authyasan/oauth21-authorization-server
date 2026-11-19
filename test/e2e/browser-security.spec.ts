@@ -28,7 +28,7 @@ test.beforeEach(async ({ request }) => {
 	await resetServer(request);
 });
 
-/** 攻撃者などのページに置いたフォームを送信し、認可サーバーへのPOSTとその応答を返す。 */
+/** 攻撃者などのページに置いたフォームを送信し、認可サーバーへのPOSTとそのレスポンスを返す。 */
 async function submitFrom(
 	page: Page,
 	host: string,
@@ -67,13 +67,13 @@ async function openConsent(page: Page): Promise<{ txnId: string; csrfToken: stri
 }
 
 test.describe("別サイトからのPOST（SameSite=Lax）", () => {
-	test("ログイン: 別サイトからはCookieが送られず403。同じトークンでも同一サイトからなら通る（対照）", async ({
+	test("ログイン: 別サイトからはCookieが送られず403。同じCSRFトークンでも同一サイトからなら通る（対照）", async ({
 		page,
 		context,
 	}) => {
 		const csrfToken = await openLoginForm(page);
 		const before = await sessionCookie(context);
-		// 拒否の理由をCookieの有無に絞るため、あえて正しいトークンを載せる。
+		// 拒否の理由をCookieの有無に絞るため、被害者のセッションの正しいCSRFトークンを送る。
 		const fields = { username: USERNAME, password: PASSWORD, csrfToken };
 
 		const cross = await submitFrom(page, HOSTS.evil, "/login", fields);
@@ -109,7 +109,7 @@ test.describe("別サイトからのPOST（SameSite=Lax）", () => {
 
 test.describe("同一サイトの別オリジンからのPOST（Cookieは送られる）", () => {
 	for (const kind of ["不一致", "欠落"] as const) {
-		test(`ログイン: Cookieが送られても、トークン${kind}なら403`, async ({ page, context }) => {
+		test(`ログイン: Cookieが送られても、CSRFトークン${kind}なら403`, async ({ page, context }) => {
 			const csrfToken = await openLoginForm(page);
 			const before = await sessionCookie(context);
 			const fields: Record<string, string> = { username: USERNAME, password: PASSWORD };
@@ -124,7 +124,7 @@ test.describe("同一サイトの別オリジンからのPOST（Cookieは送ら�
 			expect(good.status).toBe(303);
 		});
 
-		test(`同意: Cookieが送られても、トークン${kind}なら403で、認可リクエストは残る`, async ({
+		test(`同意: Cookieが送られても、CSRFトークン${kind}なら403で、認可リクエストは残る`, async ({
 			page,
 			request,
 		}) => {
@@ -169,7 +169,7 @@ test.describe("Cookie tossing（__Host-接頭辞）", () => {
 		await expect(page.locator("#tossed")).toBeVisible();
 		const cookies = await context.cookies();
 
-		// 対照: 同じ応答の接頭辞なしのDomain Cookieは受け入れられている（Set-Cookie自体は届いている）。
+		// 対照: 同じレスポンスの、接頭辞なしのDomain Cookieは受け入れられている。
 		expect(cookies.find((c) => c.name === "toss-control")?.domain).toBe(`.${HOSTS.site}`);
 		expect(cookies.find((c) => c.name === "sid")?.domain).toBe(`.${HOSTS.site}`);
 		// __Host-sid はDomain付きでは受け入れられない。認可サーバーの __Host-sid は被害者のまま。
@@ -177,7 +177,8 @@ test.describe("Cookie tossing（__Host-接頭辞）", () => {
 		expect(hostSids).toHaveLength(1);
 		expect(hostSids[0]).toMatchObject({ domain: HOSTS.as, value: victim?.value });
 
-		// 注入された sid=攻撃者 は送られるが、サーバーは読まない。攻撃者のトークンは被害者のセッションに合わず403。
+		// 注入されたsidは送信されるが、サーバーは__Host-sidを使う。
+		// 攻撃者のCSRFトークンは被害者のセッションと一致せず403になる。
 		const attack = await submitFrom(page, HOSTS.other, "/login", {
 			username: USERNAME,
 			password: PASSWORD,
@@ -186,7 +187,7 @@ test.describe("Cookie tossing（__Host-接頭辞）", () => {
 		expect((await attack.request.allHeaders()).cookie).toContain(`sid=${attacker.sid}`);
 		expect(attack.status).toBe(403);
 
-		// 対照: 被害者自身のトークンなら通る（被害者のセッションが生きている）。
+		// 対照: 被害者のセッションのCSRFトークンなら成功し、セッション自体が有効なことを確認できる。
 		const own = await submitFrom(page, HOSTS.other, "/login", {
 			username: USERNAME,
 			password: PASSWORD,

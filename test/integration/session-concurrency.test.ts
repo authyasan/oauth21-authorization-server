@@ -33,7 +33,7 @@ function sid(cookie: string): string {
 	return cookie.slice("sid=".length);
 }
 
-function post(path: string, cookie: string, body: Record<string, string>) {
+async function post(path: string, cookie: string, body: Record<string, string>) {
 	return app.request(path, {
 		method: "POST",
 		headers: { Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" },
@@ -136,7 +136,7 @@ describe("セッション作成・再生成の競合", () => {
 	});
 
 	it.each([0, 1])(
-		"初回Cookieのうち%d番を保持しても、別セッションのtxnは拒否される",
+		"並行して開始した認可フローのCookieを使っても、別セッションのtxnIdは拒否する（Cookieの配列添字=%d）",
 		async (selected) => {
 			const user = await createTestUser();
 			const flows = await Promise.all([
@@ -225,7 +225,8 @@ describe("セッション作成・再生成の競合", () => {
 					headers: { Cookie: cookie },
 				});
 				expect(stale.status).toBe(400);
-				// 敗者のタブも再読込後は勝者のセッションになる。新しい同意を経て発行する。
+				// 両方の認可リクエストを、ログインに成功した側の新しいCookieで再開する。
+				// 同意画面を取得し直し、そのユーザーとして認可コードを発行できることを確認する。
 				codes.push(await approveAndCheck(flow, newCookie, users[winner].id));
 			}
 			expect(new Set(codes).size).toBe(2);

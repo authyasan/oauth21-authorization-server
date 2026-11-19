@@ -5,10 +5,7 @@
 /**
  * redirect_uriの完全一致検証。
  *
- * [SECURITY] OAuth 2.1ではredirect_uriの完全一致が必須。
- * 部分一致やワイルドカードを許可すると、オープンリダイレクト攻撃が成立する。
- * 例: 攻撃者が `https://legitimate-app.com.evil.com/callback` を登録して
- *     正規アプリのフローを乗っ取る。
+ * [SECURITY] 登録先に似せた別のURIへ認可コードを送らないよう、文字列全体を比較する。
  *
  * @param requestUri リクエストに含まれるredirect_uri
  * @param registeredUri クライアントに登録されたredirect_uri
@@ -172,7 +169,6 @@ export function isReverseDomainScheme(uri: string): boolean {
  * @returns 許可されたスキームの場合true
  */
 export function isAllowedRedirectUriScheme(uri: string): boolean {
-	// カスタムURLスキームの場合
 	if (isPrivateUseScheme(uri)) {
 		return isReverseDomainScheme(uri);
 	}
@@ -180,12 +176,10 @@ export function isAllowedRedirectUriScheme(uri: string): boolean {
 	try {
 		const parsed = new URL(uri);
 
-		// HTTPS: 常に許可
 		if (parsed.protocol === "https:") {
 			return true;
 		}
 
-		// HTTP: ループバックアドレスの場合のみ許可
 		if (parsed.protocol === "http:") {
 			return isLoopbackUri(uri);
 		}

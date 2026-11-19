@@ -9,8 +9,7 @@ let cachedPublicKey: CryptoKey | null = null;
 let cachedJwks: { keys: Record<string, unknown>[] } | null = null;
 
 /**
- * JWT署名用の秘密鍵を取得する。
- * 初回呼び出し時にファイルから読み込み、以降はキャッシュを返す。
+ * JWT署名用の秘密鍵は初回に読み込み、以降は同じ鍵を使う。
  */
 export async function getPrivateKey(): Promise<CryptoKey> {
 	if (cachedPrivateKey) return cachedPrivateKey;
@@ -63,8 +62,7 @@ export function getJwks(): { keys: Record<string, unknown>[] } {
 // #@range_end(load-keys)
 
 /**
- * JWKSからkidを取得する。
- * getJwks() 内で検証済みのため kid は必ず string。
+ * 署名に使う先頭の鍵のkidを返す。型はgetJwks()で検証済み。
  */
 // #@range_begin(get-kid) ※書籍掲載用の範囲マーカー
 export function getKid(): string {

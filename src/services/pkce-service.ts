@@ -9,18 +9,12 @@ import { sha256Base64url } from "../utils/crypto.js";
  * OAuth 2.1ではPKCEが必須。
  * draft-16 §4.1.1はplainを禁止し、code_challenge_methodの指定を必須としている。
  * 本書ではS256のみを実装する。
- *
- * フロー:
- * 1. 認可リクエスト時: クライアントがcode_challenge = BASE64URL(SHA256(code_verifier)) を送信
- * 2. トークンリクエスト時: クライアントがcode_verifierを送信
- * 3. サーバー側: code_verifierからcode_challengeを再計算し、保存値と比較
  */
 
 /**
  * RFC 7636 §4.1 / §4.2 の ABNF: 43〜128 文字の unreserved 文字列。
  * unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
- *
- * code_verifier / code_challenge の構文を認可サーバーで検証する。
+ * S256のcode_challengeは、下の専用関数でより狭い形式を検証する。
  */
 const PKCE_SYNTAX = /^[A-Za-z0-9._~-]{43,128}$/;
 

@@ -2,9 +2,6 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/connection.js";
 import { users } from "../db/schema.js";
 
-/**
- * ユーザーの型定義。
- */
 export interface User {
 	id: string;
 	username: string;
@@ -14,14 +11,12 @@ export interface User {
 }
 
 /**
- * ユーザーリポジトリ。
- * usersテーブルへのデータアクセスを提供する。
+ * ログイン時のユーザー名検索と、ログイン後の ID によるユーザー取得を提供する。
  */
 
 /**
  * ユーザー名でユーザーを検索する。
  *
- * @param username 検索するユーザー名
  * @returns ユーザー情報（見つからない場合undefined）
  */
 export async function findUserByUsername(username: string): Promise<User | undefined> {
@@ -37,7 +32,6 @@ export async function findUserByUsername(username: string): Promise<User | undef
 /**
  * ユーザーIDでユーザーを検索する。
  *
- * @param id ユーザーID（UUID）
  * @returns ユーザー情報（見つからない場合undefined）
  */
 export async function findUserById(id: string): Promise<User | undefined> {

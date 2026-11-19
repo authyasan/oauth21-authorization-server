@@ -14,6 +14,7 @@ import { clearAllSessions } from "../../src/services/session-service.js";
 const app = createAuthorizeEndpoint();
 const client = getClient("public-spa-client");
 assert(client);
+const clientId = client.clientId;
 const originalUris = [...client.redirectUris];
 
 function redirectLocation(response: Response): URL {
@@ -24,7 +25,7 @@ function redirectLocation(response: Response): URL {
 
 function query(overrides: Record<string, string> = {}) {
 	return new URLSearchParams({
-		client_id: client.clientId,
+		client_id: clientId,
 		redirect_uri: originalUris[0],
 		response_type: "code",
 		scope: "read",

@@ -20,7 +20,7 @@ type TestClient = typeof TEST_PUBLIC_CLIENT | typeof TEST_CONFIDENTIAL_CLIENT;
 const clients = [TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT];
 const { codeVerifier, codeChallenge } = generatePkce();
 
-function post(path: string, client: TestClient, params: Record<string, string>) {
+async function post(path: string, client: TestClient, params: Record<string, string>) {
 	const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" };
 	if ("clientSecret" in client) {
 		headers.Authorization = basicAuthHeader(client.clientId, client.clientSecret);
@@ -98,7 +98,7 @@ async function waitForBlocked(table: "authorization_codes" | "grants", count: nu
 		`);
 				return Number(row.count);
 			},
-			{ timeout: 5000, intervals: [10, 25, 50] },
+			{ timeout: 5000, interval: 10 },
 		)
 		.toBe(count);
 }
@@ -138,7 +138,7 @@ async function withRowLock(
 	}
 }
 
-describe("トークンの拒否・失効範囲と競合の境界", () => {
+describe("不正なトークン交換の拒否・無効化の範囲・並行処理", () => {
 	let userId: string;
 	beforeEach(async () => {
 		await cleanupDatabase();
@@ -183,15 +183,15 @@ describe("トークンの拒否・失効範囲と競合の境界", () => {
 			},
 		);
 
-		it.each(["fresh", "in_grace", "reused", "revoked"])(
+		it.each(["fresh", "used_within_grace", "used_beyond_grace", "revoked"])(
 			"別クライアントのRTを拒否し、状態を変えない（%s）",
 			async (state) => {
 				const { code } = await authorization(owner);
 				const tokens = await issued(await exchange(code, owner));
-				if (state === "in_grace" || state === "reused") {
+				if (state === "used_within_grace" || state === "used_beyond_grace") {
 					await issued(await refresh(tokens.refresh_token, owner));
 				}
-				if (state === "reused") {
+				if (state === "used_beyond_grace") {
 					await testDb
 						.update(refreshTokens)
 						.set({ usedAt: sql`clock_timestamp() - interval '120 seconds'` })
@@ -212,7 +212,7 @@ describe("トークンの拒否・失効範囲と競合の境界", () => {
 	});
 
 	it.each([false, true])(
-		"期限切れ認可コードは使用履歴で失効を分け、別grantには波及しない（使用済み=%s）",
+		"期限切れ認可コードでも使用済みなら関連するgrantとAT・RTを無効化し、別のgrantには影響しない（使用済み=%s）",
 		async (used) => {
 			const target = await authorization();
 			if (used) await issued(await exchange(target.code, TEST_CONFIDENTIAL_CLIENT));
@@ -237,14 +237,14 @@ describe("トークンの拒否・失効範囲と競合の境界", () => {
 		},
 	);
 
-	it.each(["reused", "revoked"])(
+	it.each(["used_beyond_grace", "revoked"])(
 		"RTの再利用検知は対象grantのAT・RTだけを無効化する（%s）",
 		async (state) => {
 			const target = await authorization();
 			const tokens = await issued(await exchange(target.code, TEST_CONFIDENTIAL_CLIENT));
 			const next = await issued(await refresh(tokens.refresh_token, TEST_CONFIDENTIAL_CLIENT));
 			let presented = tokens.refresh_token;
-			if (state === "reused") {
+			if (state === "used_beyond_grace") {
 				await testDb
 					.update(refreshTokens)
 					.set({ usedAt: sql`clock_timestamp() - interval '120 seconds'` })
@@ -272,7 +272,7 @@ describe("トークンの拒否・失効範囲と競合の境界", () => {
 		},
 	);
 
-	it("認可コードの2件の消費を実際にロック待ちにし、発行は1組だけで再使用時に失効する", async () => {
+	it("同じ認可コードの交換2件をロック待ちにすると、AT・RTは1組だけ発行され、再利用検知で無効化される", async () => {
 		const { code, row } = await authorization();
 		await withRowLock("authorization_codes", row.id, async (release, pending) => {
 			pending.push(
@@ -295,7 +295,7 @@ describe("トークンの拒否・失効範囲と競合の境界", () => {
 	});
 
 	it.each(["revoke-first", "refresh-first"])(
-		"RT更新と無効化の待機順を固定し、失効を免れるATを残さない（%s）",
+		"RTによる更新と無効化のどちらを先に処理しても、関連するAT・RTをすべて無効化する（%s）",
 		async (order) => {
 			const { code, row } = await authorization();
 			const tokens = await issued(await exchange(code, TEST_CONFIDENTIAL_CLIENT));

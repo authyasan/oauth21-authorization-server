@@ -1,34 +1,34 @@
 /**
  * RS256 JWT署名鍵の生成スクリプト。
  *
- * RS256 (RSASSA-PKCS1-v1_5 + SHA-256) を採用。
- * - RFC 9068 §2.1が、準拠するAS/RSのサポートすべき署名アルゴリズムにRS256を含めることをMUSTとしている
- * - リソースサーバー側の検証ライブラリが事実上すべて対応している
- *
  * 使い方: npm run generate-keys
  * 出力先: keys/ ディレクトリ（.gitignore対象）
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose";
 
 const KEYS_DIR = join(import.meta.dirname, "..", "keys");
 
 async function main() {
-	// keys/ ディレクトリを作成
 	await mkdir(KEYS_DIR, { recursive: true });
 
 	// #@range_begin(generate-keys) ※書籍掲載用の範囲マーカー
-	// RSA 2048ビット鍵ペアを生成
 	const { publicKey, privateKey } = await generateKeyPair("RS256", {
 		modulusLength: 2048,
 		extractable: true,
 	});
 
-	// 秘密鍵はPEM形式で書き出す
 	const privatePem = await exportPKCS8(privateKey);
-	await writeFile(join(KEYS_DIR, "private.pem"), privatePem);
+	const privateFile = await open(join(KEYS_DIR, "private.pem"), "w", 0o600);
+	try {
+		// [SECURITY] 既存ファイルの上書きでも、秘密鍵を書き込む前に所有者だけの読み書きへ制限する。
+		await privateFile.chmod(0o600);
+		await privateFile.writeFile(privatePem);
+	} finally {
+		await privateFile.close();
+	}
 
 	// 公開鍵はJWK形式だけで書き出す（JWKSエンドポイントと自前の検証の両方で使う）
 	const publicJwk = await exportJWK(publicKey);

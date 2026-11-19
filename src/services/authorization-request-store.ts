@@ -23,6 +23,7 @@ interface StoredAuthorizationRequest {
 }
 
 /** 識別子 txnId をキーとする、メモリ上の保存先 */
+// [SECURITY] 学習用に定期削除と件数上限を省略しており、再参照されない期限切れデータはメモリに残る。
 const authorizationRequests = new Map<string, StoredAuthorizationRequest>();
 
 /**

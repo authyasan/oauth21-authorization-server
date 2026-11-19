@@ -7,19 +7,9 @@ export function sanitizeErrorDescription(description: string): string {
 }
 
 /**
- * OAuthエラーを表すカスタムエラークラス。
- * RFC 6749 Section 4.1.2.1（認可エンドポイント）および Section 5.2（トークンエンドポイント）に準拠。
- *
- * error_descriptionは常に含める。
- *   攻撃者に情報を与えるリスクはあるが、開発者のデバッグ効率を優先する。
- *   本番環境で制限したい場合は環境変数での切り替えを検討する余地がある。
- *
- * error_uriは提供しない。
- *   ドキュメントページの整備・維持コストに対してメリットが小さい。
- *
- * 2種類のエラーレスポンス方法がある:
- * - redirect: redirect_uriが信頼できる場合、クエリパラメータでエラーを返す
- * - json: トークンエンドポイントなど、JSONレスポンスでエラーを返す
+ * エンドポイントが返すOAuthエラーを、JSONまたはリダイレクト用のパラメータに変換する。
+ * error_descriptionは常に含め、公開する説明の詳しさは呼び出し元で決める。
+ * error_uriは提供しない。リダイレクト先の検証も呼び出し元で済ませておく。
  */
 export class OAuthError extends Error {
 	readonly code: OAuthErrorCode;

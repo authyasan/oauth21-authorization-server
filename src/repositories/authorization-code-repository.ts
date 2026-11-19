@@ -3,8 +3,7 @@ import { db, type Executor, type Transaction } from "../db/connection.js";
 import { authorizationCodes } from "../db/schema.js";
 
 /**
- * 認可コードリポジトリ。
- * 認可コードのDB操作を提供する。
+ * 認可コードの保存・検索と、一度限りの使用を管理する。
  *
  * [SECURITY] 認可コードはSHA-256ハッシュで保存する。
  * DB漏洩時に認可コードが直接漏れることを防ぐ。
@@ -14,7 +13,6 @@ import { authorizationCodes } from "../db/schema.js";
 export interface AuthorizationCodeRecord {
 	id: string;
 	codeHash: string;
-	// この認可コードが属する grant のID
 	grantId: string;
 	clientId: string;
 	userId: string;
@@ -94,29 +92,17 @@ export async function findAuthorizationCodeById(
 }
 
 /**
- * 認可コードを原子的に消費する（check-and-set）。
+ * 未使用で期限内の認可コードを、1文の UPDATE で使用済みにする。
  *
- * [SECURITY] 認可コードの一回限り使用を、競合下でも保証する。
- * 「未使用（used_at IS NULL）かつ未期限切れ（expires_at >= now()）」の行だけを 1 文の
- * UPDATE で used_at に刻み、更新できた行数で消費の成否を判定する。
+ * [SECURITY] 条件判定と更新を分けず、並行リクエストによる二重使用を防ぐ。
+ * 使用時刻と期限の判定には DB の now() を使う。期限自体は発行時にアプリで計算するため、
+ * アプリと DB の時計のずれを無視できる環境を前提とする。
  *
- * PostgreSQL の行ロックにより、同一コードへの並行リクエストでは 1 本だけが 1 行更新に
- * 成功し（戻り値 true）、残りは勝者の commit 後に WHERE を再評価して 0 行になる（false）。
+ * [SECURITY] トークン発行と同じトランザクションで呼ぶこと。
+ * 消費だけが確定したり、再使用時の無効化より後にトークンが保存されたりするのを防ぐ。
+ * 通常の DB 接続を渡せないよう、Transaction を必須にしている。
  *
- * - used_at / expires_at の判定と used_at の記録は DB クロック（now()）で行う。
- *   アプリ時刻と DB 時刻の混在による境界の曖昧さ（SELECT と UPDATE の時間差）を避ける。
- *   ただし expires_at の値そのものは、発行時にアプリの時計で計算して書いている
- *   （authorization-code-service）。単一ホスト構成では両者のずれは無視できるので、
- *   書き込みはアプリ、判定は DB という分担にしている。
- * - この UPDATE はトークン発行と同一トランザクション（tx）で実行すること。
- *   消費と発行の境界を揃えることで、再使用検知時の grant 単位カスケード失効が
- *   競合下でも漏れない（exchangeAuthorizationCode を参照）。
- *   [SECURITY] この安全条件を型で強制するため、引数は Transaction を必須にし、
- *   通常の db ハンドルでの呼び出し（消費と発行のトランザクション境界の分離）を禁じる。
- *
- * @param codeId 認可コードのID
- * @param tx トランザクションハンドル（必須。db.transaction のコールバック内から渡す）
- * @returns このリクエストが消費に成功したら true、先を越された／期限切れなら false
+ * @returns 更新できた場合は true、使用済み・期限切れ・不在の場合は false
  */
 export async function consumeAuthorizationCodeIfFresh(
 	codeId: string,

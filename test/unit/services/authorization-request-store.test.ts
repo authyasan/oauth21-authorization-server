@@ -28,14 +28,14 @@ afterEach(() => {
 
 describe("authorization-request-store", () => {
 	describe("saveAuthorizationRequest / getAuthorizationRequest", () => {
-		it("保存した認可リクエストは同一セッション ID で取得できる", () => {
+		it("保存した認可リクエストは同一セッション識別子 で取得できる", () => {
 			const sid = "sid-1";
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, sid);
 			const got = getAuthorizationRequest(txnId, sid);
 			expect(got).toEqual(sampleAuthorizationRequest);
 		});
 
-		it("txnId は 22 文字以上の base64url 文字列（128bit CSPRNG）", () => {
+		it("txnIdは22文字以上のBase64URL文字列である", () => {
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, "sid-1");
 			expect(txnId.length).toBeGreaterThanOrEqual(22);
 			expect(txnId).toMatch(/^[A-Za-z0-9_-]+$/);
@@ -53,7 +53,7 @@ describe("authorization-request-store", () => {
 			expect(getAuthorizationRequest("nonexistent", "sid-1")).toBeNull();
 		});
 
-		it("TTL 経過後は null を返す（レイジー削除）", () => {
+		it("保存した認可リクエストの有効期限を過ぎるとnullを返す", () => {
 			vi.useFakeTimers();
 			const sid = "sid-1";
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, sid);
@@ -62,7 +62,7 @@ describe("authorization-request-store", () => {
 			expect(getAuthorizationRequest(txnId, sid)).toBeNull();
 		});
 
-		it("boundSid と一致しない sid からは null を返す（fixation 攻撃対策）", () => {
+		it("保存時とは異なるセッション識別子で取得するとnullを返す", () => {
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, "sid-original");
 			expect(getAuthorizationRequest(txnId, "sid-attacker")).toBeNull();
 		});
@@ -70,7 +70,7 @@ describe("authorization-request-store", () => {
 		it("boundSid 不一致時はエントリを削除しない（正規ユーザーは再試行可能）", () => {
 			const sid = "sid-original";
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, sid);
-			// 不正な sid で 1 回引いた後でも、正規 sid で引ける
+			// 別セッションからの取得を拒否しても、紐付け先のセッションからは取得できる。
 			expect(getAuthorizationRequest(txnId, "sid-attacker")).toBeNull();
 			expect(getAuthorizationRequest(txnId, sid)).toEqual(sampleAuthorizationRequest);
 		});
@@ -88,7 +88,7 @@ describe("authorization-request-store", () => {
 			const sid = "sid-original";
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, sid);
 			expect(consumeAuthorizationRequest(txnId, "sid-attacker")).toBeNull();
-			// 正規 sid からはまだ取得できる
+			// 紐付け先のセッションからは、保存した認可リクエストを引き続き取得できる。
 			expect(getAuthorizationRequest(txnId, sid)).toEqual(sampleAuthorizationRequest);
 		});
 
@@ -98,16 +98,16 @@ describe("authorization-request-store", () => {
 	});
 
 	describe("rebindAuthorizationRequests", () => {
-		it("旧 sid に紐づく 保存データの boundSid を新 sid に張り替える", () => {
+		it("保存した認可リクエストを旧セッションから新セッションへ紐付け直す", () => {
 			const oldSid = "sid-old";
 			const newSid = "sid-new";
 			const txnId = saveAuthorizationRequest(sampleAuthorizationRequest, oldSid);
 
 			rebindAuthorizationRequests(oldSid, newSid);
 
-			// 旧 sid では引けなくなる
+			// 更新前のセッション識別子では取得できない。
 			expect(getAuthorizationRequest(txnId, oldSid)).toBeNull();
-			// 新 sid で引ける
+			// 更新後のセッション識別子では取得できる。
 			expect(getAuthorizationRequest(txnId, newSid)).toEqual(sampleAuthorizationRequest);
 		});
 

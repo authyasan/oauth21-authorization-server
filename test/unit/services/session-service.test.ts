@@ -15,14 +15,14 @@ describe("セッション管理サービス", () => {
 	});
 
 	describe("createSession", () => {
-		it("セッションIDを返す", () => {
+		it("セッション識別子を返す", () => {
 			const sessionId = createSession();
 			expect(sessionId).toBeDefined();
 			expect(typeof sessionId).toBe("string");
 			expect(sessionId.length).toBeGreaterThan(0);
 		});
 
-		it("毎回異なるセッションIDが生成される", () => {
+		it("毎回異なるセッション識別子が生成される", () => {
 			const id1 = createSession();
 			const id2 = createSession();
 			expect(id1).not.toBe(id2);
@@ -39,7 +39,7 @@ describe("セッション管理サービス", () => {
 	});
 
 	describe("validateCsrfToken", () => {
-		it("同じセッションのトークンだけを受け入れ、検証では消費しない", () => {
+		it("同じセッションのCSRFトークンだけを受け入れ、検証では消費しない", () => {
 			const session = getSession(createSession());
 			const other = getSession(createSession());
 			expect(validateCsrfToken(session, session?.csrfToken)).toBe(true);
@@ -54,7 +54,7 @@ describe("セッション管理サービス", () => {
 			},
 		);
 
-		it("セッションがなければ正しい形式のトークンでも拒否する", () => {
+		it("セッションがなければ正しい形式のCSRFトークンでも拒否する", () => {
 			expect(validateCsrfToken(null, "a".repeat(43))).toBe(false);
 		});
 
@@ -67,7 +67,7 @@ describe("セッション管理サービス", () => {
 	});
 
 	describe("getSession", () => {
-		it("存在しないセッションIDでnullを返す", () => {
+		it("存在しないセッション識別子でnullを返す", () => {
 			const session = getSession("nonexistent");
 			expect(session).toBeNull();
 		});

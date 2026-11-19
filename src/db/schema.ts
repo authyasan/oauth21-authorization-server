@@ -1,16 +1,7 @@
 import { sql } from "drizzle-orm";
-import {
-	type AnyPgColumn,
-	index,
-	pgTable,
-	text,
-	timestamp,
-	uniqueIndex,
-	uuid,
-} from "drizzle-orm/pg-core";
+import { index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
-// ユーザーテーブル
-// 簡易的なID/パスワード認証用。本格的なユーザー管理は認可サーバーのスコープ外。
+// 簡易的なID/パスワード認証用。本格的なユーザー管理は本書の対象外。
 export const users = pgTable("users", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	username: text("username").notNull().unique(),
@@ -19,11 +10,8 @@ export const users = pgTable("users", {
 	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// grant（認可付与）テーブル
-// ユーザーがクライアントに scope を付与した認可関係そのものを表す上位概念。
-// 認可コード・アクセストークン・リフレッシュトークンを束ねる grouping の起点であり、
-// grant 単位のカスケード失効・認可コード再使用検知の単位として機能する。
-// 認可フローが完了するたびに1行作る。
+// grantは、ユーザーがクライアントに許可したスコープと、
+// その認可から発行するコード・トークンを紐付ける単位。
 export const grants = pgTable(
 	"grants",
 	{
@@ -54,7 +42,6 @@ export const authorizationCodes = pgTable(
 		// [SECURITY] 認可コードのSHA-256ハッシュ。平文は保存しない。
 		// unique 制約が作る索引で検索するので、別の索引は作らない。
 		codeHash: text("code_hash").notNull().unique(),
-		// この認可コードが属する grant への参照
 		grantId: uuid("grant_id")
 			.notNull()
 			.references(() => grants.id),
@@ -68,7 +55,7 @@ export const authorizationCodes = pgTable(
 		codeChallenge: text("code_challenge").notNull(),
 		codeChallengeMethod: text("code_challenge_method").notNull().default("S256"),
 		expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-		// 使用済みフラグ。nullでない場合は使用済み。
+		// 使用時刻を残し、認可コードの再使用を検知する。
 		usedAt: timestamp("used_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},
@@ -136,9 +123,6 @@ export const refreshTokens = pgTable(
 		// 使用済みトークンの提示は再利用の兆候であり、猶予窓を過ぎていれば
 		// grant 全体の失効につながる。
 		usedAt: timestamp("used_at", { withTimezone: true }),
-		// この RT を消費して発行された後継 RT への前向きポインタ。
-		// 監査で連鎖をたどるための記録であり、検索キーにはしない。
-		replacedBy: uuid("replaced_by").references((): AnyPgColumn => refreshTokens.id),
 		revokedAt: timestamp("revoked_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 	},

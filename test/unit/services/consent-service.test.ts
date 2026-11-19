@@ -28,7 +28,7 @@ describe("canSkipConsent", () => {
 		"https://localhost/callback",
 		"https://LOCALHOST./callback",
 		"https://app.localhost/callback",
-	])("同意済みでも省略対象外: %s", async (uri) => {
+	])("同意済みでもこのリダイレクトURIでは同意を省略できない: %s", async (uri) => {
 		expect(await canSkipConsent("user", "client", "read", uri)).toBe(false);
 		expect(findConsent).not.toHaveBeenCalled();
 	});
@@ -48,13 +48,13 @@ describe("canSkipConsent", () => {
 		["write read", true],
 		["read", true],
 		["read profile", false],
-	])("HTTPSでもスコープの包含関係を確認する: %s", async (scope, expected) => {
+	])("要求scopeが同意済みの範囲内なら同意を省略できる: %s", async (scope, expected) => {
 		expect(await canSkipConsent("user", "client", scope, "https://client.example/callback")).toBe(
 			expected,
 		);
 	});
 
-	it("HTTPSでも同意の記録がなければ表示する", async () => {
+	it("HTTPSのリダイレクトURIでも同意記録がなければ同意を省略できない", async () => {
 		vi.mocked(findConsent).mockResolvedValue(undefined);
 		expect(await canSkipConsent("user", "client", "read", "https://client.example/callback")).toBe(
 			false,

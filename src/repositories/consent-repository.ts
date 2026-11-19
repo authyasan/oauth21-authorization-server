@@ -3,15 +3,12 @@ import { db } from "../db/connection.js";
 import { consents } from "../db/schema.js";
 
 /**
- * 同意リポジトリ。
  * ユーザーがクライアントに対して許可したスコープの記録を管理する。
  */
 
 /**
  * ユーザーとクライアントの組み合わせで同意記録を検索する。
  *
- * @param userId ユーザーID
- * @param clientId クライアントID
  * @returns 同意記録（見つからない場合undefined）
  */
 export async function findConsent(
@@ -35,13 +32,11 @@ export async function findConsent(
  * 同意記録を保存する。
  * 既存の同意がある場合は上書きする（スコープが変わった場合に対応）。
  *
- * @param userId ユーザーID
- * @param clientId クライアントID
  * @param scope 同意したスコープ（スペース区切り）
  */
 export async function saveConsent(userId: string, clientId: string, scope: string): Promise<void> {
-	// [SECURITY] 1文の INSERT ... ON CONFLICT で上書きする。削除してから挿入する2文では、
-	// 並行する承認がそれぞれ挿入して行が重複し、同意画面の省略判定がどの行を見るか不定になる。
+	// [SECURITY] ユーザーとクライアントの一意制約を使い、並行する同意保存も1文で処理する。
+	// 削除と挿入を分けず、同意記録が一時的に欠けることや挿入時の一意制約違反を避ける。
 	await db
 		.insert(consents)
 		.values({ userId, clientId, scope })

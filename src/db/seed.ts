@@ -3,13 +3,11 @@ import { hashPassword } from "../utils/password.js";
 import { client, db } from "./connection.js";
 import { users } from "./schema.js";
 
-// 開発用シードデータ
-// パスワードハッシュはbcryptを使用
+// 開発用ユーザーを登録する。再実行しても既存ユーザーは変更しない。
 
 async function seed() {
 	console.log("シードデータを投入します...");
 
-	// テストユーザーの作成
 	const testUserHash = await hashPassword("password123");
 	const adminHash = await hashPassword("admin123");
 

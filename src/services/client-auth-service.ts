@@ -14,8 +14,7 @@ import { logger } from "../utils/logger.js";
  *   RFC 6749 Section 5.2のinvalid_requestの定義に「utilizes more than one mechanism
  *   for authenticating the client」が明記されている。
  *
- * client_secretの比較は定数時間比較。
- *   [SECURITY] タイミング攻撃対策。
+ * [SECURITY] シークレットの推測につながる比較時間の差を抑えるため、ハッシュを定数時間で比較する。
  *
  * パブリッククライアントが認証情報を送信した場合はinvalid_request。
  *   クライアントの設定ミス（シークレットの埋め込み等）を早期に検出するため、
@@ -34,11 +33,8 @@ export type ClientAuthResult =
 			errorDescription: string;
 	  };
 
-// 純粋な認証失敗（不明なclient_id、client_secret不一致など）に共通で使う失敗結果。
-// 認証失敗の内訳は区別せず固定文言とする。
-// [SECURITY] どの段階で失敗したかを応答から区別できないよう、文言は固定する。
-// 内訳を区別して返すと、応答の違いから登録済みクライアントIDを列挙できてしまう。
-// 詳細な失敗理由はログにのみ記録する。
+// [SECURITY] 不明なclient_idとシークレット不一致を応答文言から区別させない。
+// 認証失敗の詳細はログにのみ記録する。
 const AUTH_FAILURE: ClientAuthResult = {
 	type: "failure",
 	errorCode: "invalid_client",
@@ -59,7 +55,6 @@ export function authenticateClient(
 	bodyClientSecret: string | undefined,
 ): ClientAuthResult {
 	// #@range_begin(client-auth-method-selection) ※書籍掲載用の範囲マーカー
-	// 認証方式の検出
 	// RFC 9110 §11.1 / §11.4: 大小を区別せず、区切りのASCII SPだけを消費する。
 	// 空のBasicやタブ区切りも検出し、不正な認証試行を認証なしへ落とさない。
 	const basicPrefix = authorizationHeader?.match(/^Basic(?=[ \t]|$) */i);
@@ -78,17 +73,15 @@ export function authenticateClient(
 	}
 	// #@range_end(client-auth-method-selection)
 
-	// client_secret_basic
 	if (basicPrefix) {
 		return authenticateBasic(authorizationHeader?.slice(basicPrefix[0].length) ?? "");
 	}
 
-	// client_secret_post
 	if (hasPostAuth) {
 		return authenticatePost(bodyClientId, bodyClientSecret);
 	}
 
-	// 認証情報なし → パブリッククライアント
+	// 認証情報がなければ、登録済みのパブリッククライアントだけを受け付ける。
 	if (!bodyClientId) {
 		logger.warn("クライアント認証: client_idが指定されていない");
 		return AUTH_FAILURE;
@@ -183,8 +176,7 @@ function authenticatePost(
 /**
  * client_secretの検証。
  *
- * [SECURITY] 定数時間比較でclient_secretを検証する。
- * 通常の文字列比較(===)はタイミング攻撃に脆弱。
+ * [SECURITY] シークレットのハッシュを定数時間で比較し、比較時間からの推測を抑える。
  */
 function verifyClientSecret(
 	clientId: string,
@@ -218,8 +210,7 @@ function verifyClientSecret(
 		return AUTH_FAILURE;
 	}
 
-	// [SECURITY] 定数時間比較: client_secretのSHA-256ハッシュを比較
-	// タイミング攻撃を防ぐために、constantTimeEqualを使用する
+	// [SECURITY] 平文を保存せず照合するため、受信したシークレットもハッシュ化する。
 	// #@range_begin(client-secret-hash-comparison) ※書籍掲載用の範囲マーカー
 	const providedHash = sha256(clientSecret);
 	if (!constantTimeEqual(providedHash, client.clientSecretHash)) {

@@ -28,26 +28,9 @@ import { ConsentPage } from "../views/consent.js";
 import { ErrorPage } from "../views/error.js";
 
 /**
- * 認可エンドポイント。
- *
- * GET /authorize: 新規の認可リクエストを受け付け、パラメータを検証する（startAuthorization）
- *   同意省略条件を満たす → 認可コード発行 → redirect_uriにリダイレクト
- *   未ログイン → 認可リクエストを保存 → ログイン画面へリダイレクト
- *   同意省略条件を満たさない → 認可リクエストを保存 → 同意画面を表示（hidden form field に txnId）
- *
- * GET /authorize?txnId=...: ログイン後の復帰（resumeAuthorization）
- *   保存した認可リクエストを引き、同意省略の判定から続ける
- *
- * POST /authorize: 同意画面からの応答を処理し、保存した認可リクエストを消費する
- *   承認 → 同意記録保存 → 認可コード発行 → redirect_uriにリダイレクト
- *   拒否 → redirect_uriにaccess_deniedリダイレクト
- *
- * 段階的検証
- *   - client_id/redirect_uri不正 → エラー画面表示（リダイレクト不可）
- *   - その他のエラー → redirect_uriにエラーリダイレクト
- *
- * 認可リクエストはセッションと分離した専用ストアに保管し、
- *   txnId で参照する。各遷移点で boundSid を検証する。
+ * 認可リクエストを検証し、ログイン・同意を経て認可コードを返す。
+ * 画面遷移をまたぐリクエストは専用ストアに保存し、txnIdで参照する。
+ * [SECURITY] 保存データはboundSidでセッションに紐付け、別セッションからの利用を拒否する。
  */
 export function createAuthorizeEndpoint() {
 	const app = new Hono();
@@ -68,7 +51,6 @@ export function createAuthorizeEndpoint() {
 		return startAuthorization(c, sessionId, session);
 	});
 
-	// POST /authorize: 同意画面からの応答
 	app.post("/authorize", async (c) => {
 		const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 		if (!sessionId) {
@@ -94,7 +76,7 @@ export function createAuthorizeEndpoint() {
 			return c.html(<ErrorPage />, 400);
 		}
 
-		// [SECURITY] 保存した認可リクエストを消費（boundSid 検証含む）
+		// [SECURITY] セッションの一致を確認して保存データを削除し、同じ同意応答の再処理を防ぐ。
 		const authorizationRequest = consumeAuthorizationRequest(txnId, sessionId);
 		if (!authorizationRequest) {
 			logger.warn("POST /authorize: txnId が見つからないか boundSid 不一致");
@@ -154,8 +136,7 @@ async function startAuthorization(
 	// #@range_end(authorize-query-input)
 
 	if (result.type === "client_error") {
-		// client_id/redirect_uriが不正 → エラー画面を表示
-		// [SECURITY] リダイレクトしてはならない
+		// [SECURITY] クライアントと戻り先を確認できないため、リダイレクトせず画面でエラーを返す。
 		logger.warn("認可リクエスト: クライアント検証エラー", {
 			errorDescription: result.errorDescription,
 			clientId: params.get("client_id"),
@@ -195,14 +176,13 @@ async function startAuthorization(
 		return redirectWithCode(c, authorizationRequest, userId, 302);
 	}
 
-	// 未ログイン、未同意、または同意省略対象外: 認可リクエストを保存する
-	// 必要ならセッションも作成（boundSid のため）
+	// 画面遷移後も同じセッションからの操作か確認できるよう、保存前にセッションを用意する。
 	const boundSid = sessionId && session ? sessionId : createSession();
 	if (boundSid !== sessionId) {
 		setSessionCookie(c, boundSid);
 	}
 
-	// [SECURITY] 認可リクエストの保存先に保管。boundSid で fixation を防御
+	// [SECURITY] 保存データを現在のセッションに紐付け、別セッションのtxnIdへの差し替えを防ぐ。
 	const txnId = saveAuthorizationRequest(authorizationRequest, boundSid);
 
 	if (!userId || !session) {
@@ -238,7 +218,6 @@ async function resumeAuthorization(
 
 	const userId = session?.userId;
 	if (!userId || !session) {
-		// 未ログインのまま戻ってきた → 再度ログインへ
 		logger.info("GET /authorize: txnId 付きだが未ログイン、ログイン画面へ", {
 			clientId: authorizationRequest.clientId,
 		});
@@ -271,7 +250,6 @@ async function resumeAuthorization(
 		return redirectWithCode(c, authorizationRequest, userId, 302);
 	}
 
-	// 未同意、または省略対象外のリダイレクト先 → 同意画面を表示
 	// 保存時に検証済みのクライアント。設定は起動時に固定されるので、通常は必ず見つかる。
 	const client = findClientById(authorizationRequest.clientId);
 	if (!client) {

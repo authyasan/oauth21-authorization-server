@@ -29,6 +29,8 @@ import {
 	testDb,
 } from "./helpers.js";
 
+type TestClient = typeof TEST_PUBLIC_CLIENT | typeof TEST_CONFIDENTIAL_CLIENT;
+
 const HTTPS_REDIRECT_URI = "https://client.example/callback";
 const BASIC_AUTH_CASES = ["Basic", "bAsIc", "basic", "BASIC"].flatMap((scheme) =>
 	[1, 2, 5].map((spaces) => ({ scheme, spaces })),
@@ -38,7 +40,7 @@ assert(confidentialClient);
 const originalConfidentialUris = [...confidentialClient.redirectUris];
 
 // テスト用ヘルパー: appにHTTPリクエストを送信
-function request(path: string, init?: RequestInit): Promise<Response> {
+async function request(path: string, init?: RequestInit): Promise<Response> {
 	return app.request(path, init);
 }
 
@@ -77,7 +79,7 @@ describe("OAuth 2.1 結合テスト", () => {
 	});
 
 	// ============================================================
-	// トークン認証チャレンジ
+	// クライアント認証と認証失敗時のレスポンス
 	// ============================================================
 
 	describe("共通クライアント認証のスキーム名", () => {
@@ -165,7 +167,7 @@ describe("OAuth 2.1 結合テスト", () => {
 	});
 
 	describe.each(["authorization_code", "refresh_token"])(
-		"トークン認証チャレンジ（%s）",
+		"トークンエンドポイントのクライアント認証エラーレスポンス（%s）",
 		(grantType) => {
 			it.each([
 				...BASIC_AUTH_CASES.flatMap(({ scheme, spaces }) => [
@@ -205,7 +207,9 @@ describe("OAuth 2.1 結合テスト", () => {
 				const headers: Record<string, string> = {
 					"Content-Type": "application/x-www-form-urlencoded",
 				};
-				if (testCase.authorization) headers.Authorization = testCase.authorization;
+				if ("authorization" in testCase && testCase.authorization) {
+					headers.Authorization = testCase.authorization;
+				}
 				const params: Record<string, string> = { grant_type: grantType };
 				for (const [name, value] of Object.entries(testCase.params)) {
 					if (value !== undefined) params[name] = value;
@@ -273,7 +277,7 @@ describe("OAuth 2.1 結合テスト", () => {
 	// ============================================================
 
 	describe("基本エンドポイント", () => {
-		it("GET /health が正常に応答する", async () => {
+		it("GET /healthが200とstatus: okを返す", async () => {
 			const res = await request("/health");
 			expect(res.status).toBe(200);
 			const body = await res.json();
@@ -603,11 +607,9 @@ describe("OAuth 2.1 結合テスト", () => {
 	// ============================================================
 
 	describe("リフレッシュトークンのローテーション", () => {
-		// [SECURITY]
-		// 更新のたびにリフレッシュトークンをローテーションし、無効になったトークンの提示を
-		// 漏洩の兆候として grant 単位で失効させる。応答の喪失に備えて消費から60秒の
-		// 猶予窓を設ける。ここで確認する不変条件は「1つの grant に生きたリフレッシュトークンは
-		// 高々1本」であり、これが破れると再利用検知が永久に発火しなくなる。
+		// [SECURITY] レスポンスを受け取れなかった場合の再送を、RTの初回使用から60秒間受け付ける。
+		// 再送時は同じgrantの未使用・未無効化のRTを無効化してから、新しいRTを発行する。
+		// 更新後に未使用・未無効化のRTが複数残らないことと、再利用検知による無効化を確認する。
 
 		/** コンフィデンシャルクライアントでリフレッシュ要求を送る */
 		function refresh(refreshToken: string, params?: Record<string, string>) {
@@ -628,7 +630,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			});
 		}
 
-		/** 平文のリフレッシュトークンから DB 行を引く */
+		/** 平文のRTをハッシュ化し、対応するレコードを取得する。 */
 		async function findRefreshToken(token: string) {
 			const rows = await testDb
 				.select()
@@ -638,7 +640,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			return rows[0];
 		}
 
-		/** grant 配下の生きた（未使用かつ未失効の）リフレッシュトークン */
+		/** 同じgrantの未使用・未無効化のRTを取得する。有効期限は確認しない。 */
 		async function liveRefreshTokens(grantId: string) {
 			return testDb
 				.select()
@@ -652,13 +654,13 @@ describe("OAuth 2.1 結合テスト", () => {
 				);
 		}
 
-		/** grant 行を引く */
+		/** grantのレコードを取得する。 */
 		async function findGrant(grantId: string) {
 			const rows = await testDb.select().from(grants).where(eq(grants.id, grantId)).limit(1);
 			return rows[0];
 		}
 
-		it("更新のたびに新しいリフレッシュトークンが返り、旧トークンは消費済みになる", async () => {
+		it("RTで更新すると新しいRTが返り、提示したRTは使用済みになる", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
@@ -670,19 +672,19 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(rt1).toBeTruthy();
 			expect(rt1).not.toBe(rt0);
 
-			// 旧トークンは消費済みになり、後継への前向きポインタが張られる
+			// 旧トークンは消費済みになり、新しいRTも同じgrantに属する。
 			const consumed = await findRefreshToken(rt0);
 			expect(consumed.usedAt).not.toBeNull();
 			const row1 = await findRefreshToken(rt1);
-			expect(consumed.replacedBy).toBe(row1.id);
+			expect(row1.grantId).toBe(row0.grantId);
 
-			// 生きたリフレッシュトークンは新しいほうの1本だけ
+			// 未使用・未無効化のRTは、新しく発行した1つだけ。
 			const live = await liveRefreshTokens(row0.grantId);
 			expect(live).toHaveLength(1);
 			expect(live[0].id).toBe(row1.id);
 		});
 
-		it("猶予窓内の再送は後継RTを失効させるが、既存ATとgrantは無効化しない", async () => {
+		it("猶予期間内に同じRTを再送すると直前に発行したRTを無効化し、既存ATとgrantは維持する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
@@ -730,8 +732,8 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(await findGrant(row0.grantId)).toEqual(beforeGrant);
 
 			const row2 = await findRefreshToken(rt2);
-			// 旧RTは後継への参照だけを更新し、使用時刻や無効化状態は変更しない。
-			expect(await findRefreshToken(rt0)).toEqual({ ...consumed, replacedBy: row2.id });
+			// 再送しても旧RTの使用時刻や無効化状態は変更しない。
+			expect(await findRefreshToken(rt0)).toEqual(consumed);
 			// 直前の後継RTは無効化日時だけが変わる。
 			const row1 = await findRefreshToken(rt1);
 			expect(row1).toEqual({ ...previousSuccessor, revokedAt: expect.any(Date) });
@@ -739,7 +741,6 @@ describe("OAuth 2.1 結合テスト", () => {
 				grantId: row0.grantId,
 				usedAt: null,
 				revokedAt: null,
-				replacedBy: null,
 			});
 
 			const live = await liveRefreshTokens(row0.grantId);
@@ -747,15 +748,15 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(live[0].id).toBe(row2.id);
 		});
 
-		it("連鎖が2世代進んだあとの猶予窓でも、生きたトークンは1本に保たれる", async () => {
+		it("2回更新した後に最初のRTを猶予期間内に再送しても、未使用・未無効化のRTは1つだけ残る", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
 			const rt1 = (await (await refresh(rt0)).json()).refresh_token as string;
 			const rt2 = (await (await refresh(rt1)).json()).refresh_token as string;
 
-			// [SECURITY] 直後の後継（rt1）だけを失効させる実装だと rt2 が生き残り、
-			// 有効なトークンが2本並んで再利用検知が発火しなくなる
+			// [SECURITY] rt1だけを無効化すると、rt2と今回発行するrt3が並存し、
+			// 同じgrantから別々に更新を続けられてしまう。
 			const retry = await refresh(rt0);
 			expect(retry.status).toBe(200);
 			const rt3 = (await retry.json()).refresh_token as string;
@@ -767,15 +768,15 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(live[0].id).toBe((await findRefreshToken(rt3)).id);
 		});
 
-		it("猶予窓のやり直しで失効させたトークンの提示は再利用として grant を失効させる", async () => {
+		it("猶予期間内の再送によって無効化されたRTを提示すると、再利用としてgrantと関連するAT・RTを無効化する", async () => {
 			const { accessToken, refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
 			const rt1 = (await (await refresh(rt0)).json()).refresh_token as string;
-			await refresh(rt0); // やり直しで rt1 が失効する
+			await refresh(rt0); // 猶予期間内にrt0を再送すると、rt1が無効化される
 
-			// [SECURITY] 失効させられたトークンの提示も再利用として扱う。
-			// 攻撃者が猶予窓を使った場合、失効するのは正規のクライアントが持つトークンになる。
+			// [SECURITY] 正規クライアントがRT1を取得した後、攻撃者が猶予期間内にRT0を再提示すると、
+			// 正規クライアントのRT1が無効化される。そのRT1の提示でも再利用を検知し、grantを無効化する。
 			const res = await refresh(rt1);
 			expect(res.status).toBe(400);
 			expect((await res.json()).error).toBe("invalid_grant");
@@ -793,7 +794,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(accessToken).toBeTruthy();
 		});
 
-		it("猶予窓を過ぎた使用済みトークンの提示は再利用として grant を失効させる", async () => {
+		it("猶予期間を過ぎた使用済みRTを提示すると、grantと後継RTを無効化する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
@@ -813,11 +814,12 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await findRefreshToken(rt1)).revokedAt).not.toBeNull();
 		});
 
-		it("同一トークンの並行提示でも、生きたトークンは1本に収束する", async () => {
+		it("同じRTによる並行更新を受け付けても、未使用・未無効化のRTは同じgrant内に1つだけ残る", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
-			// [SECURITY] grant 行ロックで直列化され、敗者は消費に失敗して猶予窓の処理に回る
+			// [SECURITY] 同じgrantの更新はロックで直列化する。
+			// 後から処理するリクエストは、使用済みのRT0を猶予期間内の再送として扱う。
 			const [resA, resB] = await Promise.all([refresh(rt0), refresh(rt0)]);
 			expect(resA.status).toBe(200);
 			expect(resB.status).toBe(200);
@@ -827,12 +829,12 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await findGrant(row0.grantId)).revokedAt).toBeNull();
 		});
 
-		it("使用済みの旧トークンを /revoke に渡すと 200 を返し grant が失効する", async () => {
+		it("使用済みRTを/revokeに提示すると200を返し、grantと未使用のRTを無効化する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 			await refresh(rt0);
 
-			// トークン自体が死んでいても、消せと言われたら消す（期限切れのトークンもリボークできるのと同じ考え方）
+			// 使用済みのRTを指定した無効化要求でも、そのRTが属するgrantを無効化する。
 			const res = await request("/revoke", {
 				method: "POST",
 				headers: {
@@ -850,7 +852,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(await liveRefreshTokens(row0.grantId)).toHaveLength(0);
 		});
 
-		it("一度も使われないまま期限切れになったトークンでは grant を失効させない", async () => {
+		it("未使用のRTが期限切れなら更新を拒否し、grantは無効化しない", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
@@ -863,16 +865,16 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(res.status).toBe(400);
 			expect((await res.json()).error).toBe("invalid_grant");
 
-			// 期限切れのトークン1つで正規の利用者を追い出さない
+			// 未使用・未無効化のRTの期限切れは再利用とみなさず、grantは無効化しない。
 			expect((await findGrant(row0.grantId)).revokedAt).toBeNull();
 		});
 
-		it("失効させられたトークンは、期限を過ぎてから提示されても grant を失効させる", async () => {
+		it("無効化済みRTを提示すると、有効期限を過ぎていてもgrantを無効化する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
-			// [SECURITY] 期限を来歴より先に見る実装だと、この提示が期限切れとして
-			// 素通りし、サーバー側に残っている再利用の証拠を捨てることになる
+			// [SECURITY] 無効化済みRTの提示は、有効期限を過ぎていても再利用として扱う。
+			// 単なる期限切れとして拒否するだけでは、関連トークンが無効化されない。
 			await testDb
 				.update(refreshTokens)
 				.set({
@@ -887,7 +889,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await findGrant(row0.grantId)).revokedAt).not.toBeNull();
 		});
 
-		it("使用済みのトークンは、猶予窓と期限の両方を過ぎてから提示されても grant を失効させる", async () => {
+		it("使用済みRTを提示すると、猶予期間と有効期限の両方を過ぎていてもgrantを無効化する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 			await refresh(rt0);
@@ -906,7 +908,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await findGrant(row0.grantId)).revokedAt).not.toBeNull();
 		});
 
-		it("後継トークンの有効期限は grant 誕生からの絶対上限で頭打ちになる", async () => {
+		it("更新で発行するRTの有効期限はgrant作成からの絶対上限を超えない", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
@@ -925,15 +927,14 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(remainingDays).toBeGreaterThan(0);
 		});
 
-		it("猶予窓の内側でも、grant の絶対上限を過ぎていれば更新できない", async () => {
+		it("猶予期間内の再送でも、grant作成からの絶対上限を過ぎていれば更新を拒否する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 
 			const rt1 = (await (await refresh(rt0)).json()).refresh_token as string;
 
-			// [SECURITY] 猶予窓のやり直しは消費の期限判定を通らない。絶対上限を見ないと
-			// min(無操作期限, 絶対上限) が過去になり、受け取った瞬間に期限切れの
-			// リフレッシュトークンを 200 で返してしまう
+			// [SECURITY] 猶予期間内の再送でも、RTの有効期限の絶対上限を過ぎていれば拒否する。
+			// すでに期限切れのRTを新たに発行しないため。
 			await testDb
 				.update(grants)
 				.set({ createdAt: sql`now() - interval '181 days'` })
@@ -946,7 +947,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			// 上限に達しただけなので grant は失効させない（再利用ではない）
 			expect((await findGrant(row0.grantId)).revokedAt).toBeNull();
 
-			// やり直しに入っていないので、直前の後継はそのまま生きている
+			// 再送による更新は拒否されたため、RT1の使用済み・無効化の状態は変更されない。
 			const live = await liveRefreshTokens(row0.grantId);
 			expect(live).toHaveLength(1);
 			expect(live[0].id).toBe((await findRefreshToken(rt1)).id);
@@ -960,8 +961,8 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(res.status).toBe(400);
 			expect((await res.json()).error).toBe("invalid_scope");
 
-			// スコープの検証は消費のあとに行うため、失敗時はトランザクションごと
-			// 巻き戻す。クライアントの誤りで正規のトークンを殺さないため
+			// スコープの検証に失敗した場合は、先に記録したRTの使用済み状態も巻き戻す。
+			// 正しいスコープで再試行できることを確認する。
 			expect((await findRefreshToken(rt0)).usedAt).toBeNull();
 			expect(await liveRefreshTokens(row0.grantId)).toHaveLength(1);
 
@@ -969,7 +970,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await refresh(rt0)).status).toBe(200);
 		});
 
-		it("使用済みトークンに範囲外のスコープを添えても再利用検知が働く", async () => {
+		it("猶予期間を過ぎた使用済みRTは、範囲外のscopeを指定しても再利用を検知する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens({ scope: "read" });
 			const row0 = await findRefreshToken(rt0);
 			await refresh(rt0);
@@ -988,7 +989,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect((await findGrant(row0.grantId)).revokedAt).not.toBeNull();
 		});
 
-		it("猶予窓の判定には grant 行ロックの待ち時間が含まれる", async () => {
+		it("grantのロック待ち中に猶予期間が終了した再送は、再利用として拒否する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens();
 			const row0 = await findRefreshToken(rt0);
 			await refresh(rt0);
@@ -1021,16 +1022,15 @@ describe("OAuth 2.1 結合テスト", () => {
 			releaseLock();
 			await holding;
 
-			// [SECURITY] 窓の判定を now()（トランザクション開始時刻）で行うと、
-			// ロックを待つあいだに窓が閉じても内側と見なされ、猶予窓が実質的に延びる。
-			// clock_timestamp() で判定すれば待ち時間が反映され、再利用として検知される
+			// [SECURITY] ロック待ちの間に猶予期間が終了した場合も、再利用として検知する。
+			// 待機前の時刻で判定して猶予期間内として受け付けてしまわないことを確認する。
 			const res = await pending;
 			expect(res.status).toBe(400);
 			expect((await res.json()).error).toBe("invalid_grant");
 			expect((await findGrant(row0.grantId)).revokedAt).not.toBeNull();
 		});
 
-		it("パブリッククライアントでもローテーションが働く", async () => {
+		it("パブリッククライアントの更新でも、提示したRTとは異なる新しいRTを返す", async () => {
 			const { codeVerifier, codeChallenge } = generatePkce();
 
 			const code = await performAuthorizationFlow({
@@ -1074,16 +1074,16 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(body.expires_in).toBe(1800);
 		});
 
-		it("スコープを縮めて更新しても、以後の更新の上限は変わらない", async () => {
+		it("scopeを限定して更新した後でも、次の更新でscopeを省略すると元の範囲のATを発行する", async () => {
 			const { refreshToken: rt0 } = await obtainTokens({ scope: "read write" });
 
-			// 縮小はそのとき発行するアクセストークンにだけ効く
-			// （draft-15 §4.3.3: 後継の scope はリクエストに含まれたトークンと一致させる）
+			// 要求した狭いスコープは今回のATに適用し、新しいRTのスコープは引き継ぐ。
+			// OAuth 2.1 draft-16 §4.3.3。
 			const body = await (await refresh(rt0, { scope: "read" })).json();
 			expect(body.scope).toBe("read");
 
-			// 上限は grant 行にあり、後継のリフレッシュトークンは
-			// スコープを持たない。scope を省略した次の更新が元の範囲に戻ることで確かめる。
+			// RTのスコープは紐付くgrantに保存している。
+			// 次の更新でscopeを省略すると、元のread writeでATが発行されることを確認する。
 			const again = await refresh(body.refresh_token as string);
 			expect((await again.json()).scope).toBe("read write");
 		});
@@ -1131,7 +1131,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(introBody.active).toBe(false);
 		});
 
-		it("リフレッシュトークンリボーク時に関連アクセストークンもカスケードリボークされる", async () => {
+		it("RTの無効化を要求すると、関連するATも無効化する", async () => {
 			const { accessToken, refreshToken } = await obtainTokens();
 
 			// リフレッシュトークンをリボーク
@@ -1352,8 +1352,8 @@ describe("OAuth 2.1 結合テスト", () => {
 		});
 
 		// [SECURITY] client_id 不一致のトークンはリボークできない
-		it("別クライアントが発行したアクセストークンはリボークできない", async () => {
-			const { accessToken } = await obtainTokens(); // confidential が発行
+		it("別のクライアントに発行されたアクセストークンは無効化できない", async () => {
+			const { accessToken } = await obtainTokens(); // コンフィデンシャルクライアント向けに発行
 
 			// 別クライアント（public）が同じトークンをリボーク試行
 			const res = await request("/revoke", {
@@ -1384,7 +1384,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(introBody.active).toBe(true);
 		});
 
-		it("別クライアントが発行したリフレッシュトークンはリボークできない", async () => {
+		it("別のクライアントに発行されたリフレッシュトークンは無効化できない", async () => {
 			const { accessToken, refreshToken } = await obtainTokens(); // confidential
 
 			const res = await request("/revoke", {
@@ -1398,7 +1398,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			});
 			expect(res.status).toBe(200);
 
-			// access はカスケードされていない（refresh が削除されていないため）
+			// RTの無効化要求が受け入れられないため、関連するATも無効化されない。
 			const introRes = await request("/introspect", {
 				method: "POST",
 				headers: {
@@ -1414,8 +1414,8 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(introBody.active).toBe(true);
 		});
 
-		// 補足: アクセストークンの単独リボークは refresh をカスケード破棄しない
-		it("アクセストークンリボーク時にはリフレッシュトークンはカスケードリボークされない", async () => {
+		// ATだけを無効化しても、関連するRTは無効化しない。
+		it("ATの無効化を要求しても、関連するRTは無効化しない", async () => {
 			const { accessToken, refreshToken } = await obtainTokens();
 
 			// アクセストークンのみリボーク
@@ -1461,7 +1461,7 @@ describe("OAuth 2.1 結合テスト", () => {
 	// ============================================================
 
 	describe("イントロスペクション", () => {
-		it("有効なトークンのイントロスペクション", async () => {
+		it("有効なATを照会するとactive=trueとトークンの情報を返す", async () => {
 			const { accessToken } = await obtainTokens();
 
 			const res = await request("/introspect", {
@@ -1641,7 +1641,7 @@ describe("OAuth 2.1 結合テスト", () => {
 							if (audience.includes(rs.resourceServerId)) {
 								expect(body).toMatchObject({ active: true, aud: expectedAud, scope });
 							} else {
-								// 対象外のRSには、有効性以外の情報を返さない
+								// audに含まれないRSには、active: falseだけを返す。
 								expect(body).toEqual({ active: false });
 							}
 						}
@@ -1684,7 +1684,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			});
 		});
 
-		it("未登録のリソースサーバーIDでは401", async () => {
+		it("未登録のリソースサーバー識別子では401", async () => {
 			const res = await request("/introspect", {
 				method: "POST",
 				headers: {
@@ -1698,7 +1698,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(body.error).toBe("invalid_client");
 		});
 
-		it("OAuthクライアントのIDではイントロスペクションできない", async () => {
+		it("OAuthクライアントの識別子ではイントロスペクションできない", async () => {
 			const res = await request("/introspect", {
 				method: "POST",
 				headers: {
@@ -1763,7 +1763,7 @@ describe("OAuth 2.1 結合テスト", () => {
 		it("有効期限切れトークンは active: false を返す", async () => {
 			const { accessToken } = await obtainTokens();
 
-			// 31 分後に時刻を進める（コンフィデンシャルのトークンは 30 分有効）
+			// ATの有効期限30分を過ぎるよう、アプリの時計を31分進める。
 			const now = Date.now();
 			vi.useFakeTimers({ now: now + 31 * 60 * 1000, shouldAdvanceTime: true });
 
@@ -1859,8 +1859,8 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(introBody.active).toBe(false);
 		});
 
-		// 不正パラメータでの再使用試行ではトークンを無効化しない
-		// （OAuth 2.1 §7.5.2 後半の DoS 対策）
+		// [SECURITY] 不正なcode_verifierを伴う再使用試行では、発行済みトークンを無効化しない。
+		// OAuth 2.1 draft-16 §7.5.3のDoS対策。
 		it("使用済み認可コードを不正なcode_verifierで再使用しても既発行トークンは無効化されない", async () => {
 			const { codeVerifier, codeChallenge } = generatePkce();
 
@@ -1936,12 +1936,10 @@ describe("OAuth 2.1 結合テスト", () => {
 	// ============================================================
 
 	describe("認可コードの並行交換", () => {
-		// [SECURITY] 同一認可コードを並行交換しても、成功は最大1件に
-		// 限られ、再利用検知で grant ごと失効する（勝者が発行したトークンも含めて）。
-		// 消費とトークン発行を同一トランザクションに置く修正がないと、敗者の grant 失効が
-		// 勝者のトークン挿入より先に走り、勝者トークンが失効対象から漏れて生き残る。
-		// この回帰は実DBの並行実行でしか再現しない。
-		it("同一コードの並行交換は1件だけ成功し、再利用検知で勝者トークンも失効する", async () => {
+		// [SECURITY] 同じ認可コードの並行交換では成功を1件に限定し、
+		// 再利用検知によって、先に成功した交換で発行されたAT・RTも無効化する。
+		// 消費と発行が別トランザクションだと、無効化後にトークンが保存されるおそれがある。
+		it("同じ認可コードの並行交換は1件だけ成功し、そこで発行したAT・RTも再利用検知で無効化する", async () => {
 			const { codeVerifier, codeChallenge } = generatePkce();
 
 			const code = await performAuthorizationFlow({
@@ -1978,7 +1976,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			// 成功はちょうど1件、もう1件は invalid_grant（400）
 			expect(statuses).toEqual([200, 400]);
 
-			// 勝者（200）のレスポンスからトークンを取り出す
+			// 交換に成功したリクエスト（200）のレスポンスからAT・RTを取り出す。
 			const successRes = resA.status === 200 ? resA : resB;
 			const successBody = await successRes.json();
 			const accessToken = successBody.access_token as string;
@@ -1986,7 +1984,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(accessToken).toBeTruthy();
 			expect(refreshToken).toBeTruthy();
 
-			// [SECURITY] 並行交換は再利用として扱われ、勝者の AT も失効している
+			// [SECURITY] 後から処理された交換で再利用を検知し、先に発行されたATも無効化される。
 			const introRes = await request("/introspect", {
 				method: "POST",
 				headers: {
@@ -2001,7 +1999,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			const introBody = await introRes.json();
 			expect(introBody.active).toBe(false);
 
-			// [SECURITY] 勝者の RT も失効しており、リフレッシュは invalid_grant になる
+			// [SECURITY] 先に発行されたRTも無効化され、更新はinvalid_grantで拒否される。
 			const refreshRes = await request("/token", {
 				method: "POST",
 				headers: {
@@ -2020,12 +2018,10 @@ describe("OAuth 2.1 結合テスト", () => {
 		});
 	});
 
-	describe("リフレッシュと失効の競合", () => {
-		// [SECURITY] リフレッシュによる AT 発行と revokeGrant を
-		// grant 行ロック（lockActiveGrant / FOR UPDATE）で直列化する。この直列化がないと、
-		// 失効コミットの直後に発行された新 AT が失効対象から漏れ、grant 失効後も生き残る。
-		// 実DBの並行実行でのみ再現する不変条件を確認する。
-		it("リフレッシュとリフレッシュトークンリボークを並行実行しても孤児アクセストークンが残らない", async () => {
+	describe("RTによる更新と無効化の競合", () => {
+		// [SECURITY] 同じgrantのRT更新と無効化を、grantのレコードのロックで直列化する。
+		// 更新が先なら追加発行したATも無効化し、無効化が先なら更新を拒否する。
+		it("RTによる更新と無効化を並行実行しても、更新で発行したATが無効化を免れない", async () => {
 			const { refreshToken } = await obtainTokens();
 			expect(refreshToken).toBeTruthy();
 
@@ -2138,7 +2134,7 @@ describe("OAuth 2.1 結合テスト", () => {
 
 	// ============================================================
 	// 認可エンドポイントのリクエストパターン
-	// DB が必要なパターンを結合テストでカバーする。
+	// 認可受付・ログイン後の復帰・同意POSTのレスポンスを確認する。
 	// ============================================================
 
 	describe("認可エンドポイント: リクエストパターン", () => {
@@ -2302,7 +2298,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(res.headers.get("content-type")).toContain("text/html");
 		});
 
-		it("store が null を返す（不正/期限切れ/boundSid不一致）→ 400", async () => {
+		it("別のセッションに紐付くtxnIdで認可を再開しようとすると400を返す", async () => {
 			// セッションは作るが txnId は別セッション ID で作成（boundSid 不一致）
 			// 代表として他セッションで作った txnId を踏むケースを使用。
 			// 「存在しない」「期限切れ」も同じく store が null を返すので
@@ -2375,7 +2371,7 @@ describe("OAuth 2.1 結合テスト", () => {
 		// GET /authorize 新規パス（?txnId=... なし）
 		// ========================================================
 
-		it("クエリ完全 + セッションなし → Set-Cookie 付き /login?txnId=...", async () => {
+		it("認可パラメーターが揃いセッションがなければ、Cookieを設定してログイン画面へリダイレクトする", async () => {
 			const { codeChallenge } = generatePkce();
 			const res = await request(
 				buildAuthorizeUrl({
@@ -2392,7 +2388,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(setCookie).toContain("HttpOnly");
 		});
 
-		it("クエリ完全 + 既存セッション → Set-Cookie なし、新しい txnId が発行される", async () => {
+		it("既存セッションで新しい認可リクエストを受けると、Cookieを再設定せず新しいtxnIdを発行する", async () => {
 			const { codeChallenge } = generatePkce();
 			// 1 回目: セッション作成 + txnId 発行
 			const firstRes = await request(
@@ -2427,8 +2423,7 @@ describe("OAuth 2.1 結合テスト", () => {
 		});
 
 		it("response_type なし → redirect_uri に invalid_request リダイレクト", async () => {
-			// validator の redirect_error をエンドポイントが redirect_uri 付きで
-			// リダイレクトするかの代表確認。他のエラー種別は validator unit でカバー。
+			// 検証結果がredirect_errorの場合、登録済みのリダイレクトURIへエラーを返すことを確認する。
 			const { codeChallenge } = generatePkce();
 			const params = new URLSearchParams({
 				client_id: TEST_PUBLIC_CLIENT.clientId,
@@ -2619,8 +2614,7 @@ describe("OAuth 2.1 結合テスト", () => {
 
 		// ========================================================
 		// RFC 9207: Authorization Server Issuer Identification
-		// 認可コード発行成功時の iss は、同意済みでの発行・認可コード再利用検知・主フロー
-		// などで間接的にカバーされる。ここではリダイレクト型エラーで明示確認。
+		// 認可エラーのリダイレクトにもissが含まれることを確認する。
 		// ========================================================
 
 		it("RFC 9207: リダイレクト型エラーレスポンスに iss が含まれる", async () => {
@@ -2705,15 +2699,11 @@ describe("OAuth 2.1 結合テスト", () => {
 	});
 
 	// ============================================================
-	// エラーケース
-	// ============================================================
-
-	// ============================================================
 	// セキュリティテスト
 	// ============================================================
 
 	describe("セキュリティ", () => {
-		it("ログイン成功時にセッションIDが再生成される（セッション固定攻撃対策）", async () => {
+		it("ログイン成功時にセッション識別子が再生成される（セッション固定攻撃対策）", async () => {
 			const { codeChallenge } = generatePkce();
 			const authorizeUrl = buildAuthorizeUrl({
 				clientId: TEST_CONFIDENTIAL_CLIENT.clientId,
@@ -2751,7 +2741,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(postLoginSessionId).not.toBe(preLoginSessionId);
 		});
 
-		it("セッションID再生成後も txnId は新 sid に rebind され、認可フローを継続できる", async () => {
+		it("ログイン後に認可リクエストを新しいセッションに紐付け直し、認可フローを継続できる", async () => {
 			const { codeChallenge } = generatePkce();
 			const authorizeUrl = buildAuthorizeUrl({
 				clientId: TEST_CONFIDENTIAL_CLIENT.clientId,
@@ -2799,7 +2789,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(html).toContain("認可");
 		});
 
-		it("ログイン前の古いセッションIDで txnId を引こうとしても boundSid 不一致で拒否される", async () => {
+		it("ログイン前のセッション識別子では、保存した認可リクエストを取得できない", async () => {
 			const { codeChallenge } = generatePkce();
 			const authorizeUrl = buildAuthorizeUrl({
 				clientId: TEST_CONFIDENTIAL_CLIENT.clientId,
@@ -2943,7 +2933,7 @@ describe("OAuth 2.1 結合テスト", () => {
 	// トークンエンドポイント: パラメータ・認証検証
 	// ============================================================
 
-	describe.each([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
+	describe.each<TestClient>([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
 		"トークン交換のredirect_uri省略: $clientId",
 		(client) => {
 			const { codeVerifier } = generatePkce();
@@ -2951,6 +2941,10 @@ describe("OAuth 2.1 結合テスト", () => {
 				client.clientId === TEST_PUBLIC_CLIENT.clientId
 					? TEST_CONFIDENTIAL_CLIENT
 					: TEST_PUBLIC_CLIENT;
+			const otherClientSecret =
+				client.clientId === TEST_PUBLIC_CLIENT.clientId
+					? TEST_CONFIDENTIAL_CLIENT.clientSecret
+					: undefined;
 
 			async function createCode(verifier = codeVerifier) {
 				return performAuthorizationFlow({
@@ -3098,7 +3092,7 @@ describe("OAuth 2.1 結合テスト", () => {
 				const code = await createCode();
 				const response = await exchange(code, {
 					client_id: otherClient.clientId,
-					client_secret: "clientSecret" in otherClient ? otherClient.clientSecret : undefined,
+					client_secret: otherClientSecret,
 				});
 				expect(response.status).toBe(400);
 				expect(await response.json()).toMatchObject({ error: "invalid_grant" });
@@ -3116,7 +3110,7 @@ describe("OAuth 2.1 結合テスト", () => {
 				expect(await response.json()).toMatchObject({ error: "invalid_grant" });
 			});
 
-			it("省略時も正当な再使用だけがgrantと関連トークンを失効させる", async () => {
+			it("redirect_uri省略時も、クライアントとPKCEの検証を通過した認可コードの再使用でgrantとAT・RTを無効化する", async () => {
 				const code = await createCode();
 				expect((await exchange(code)).status).toBe(200);
 				const record = await testDb.query.authorizationCodes.findFirst({
@@ -3147,7 +3141,7 @@ describe("OAuth 2.1 結合テスト", () => {
 					{ code_verifier: "x".repeat(43) },
 					{
 						client_id: otherClient.clientId,
-						client_secret: "clientSecret" in otherClient ? otherClient.clientSecret : undefined,
+						client_secret: otherClientSecret,
 					},
 					{ redirect_uri: " " },
 					{ redirect_uri: "https://other.example/callback" },
@@ -3167,7 +3161,7 @@ describe("OAuth 2.1 結合テスト", () => {
 		},
 	);
 
-	describe.each([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
+	describe.each<TestClient>([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
 		"トークンリクエストの共通パラメータ: $clientId",
 		(client) => {
 			const { codeVerifier, codeChallenge } = generatePkce();
@@ -3562,7 +3556,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(retry.status).toBe(200);
 		});
 
-		it("refresh_token グラントでクライアント認証なしは invalid_client", async () => {
+		it("コンフィデンシャルクライアントのRT更新で認証情報がなければinvalid_clientを返す", async () => {
 			const res = await request("/token", {
 				method: "POST",
 				headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -3605,7 +3599,7 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(res.status).toBe(401);
 		});
 
-		it("BasicとPostの認証方式を同時に使うと 400 invalid_request", async () => {
+		it("client_secret_basicとclient_secret_postを同時に使うと400のinvalid_requestを返す", async () => {
 			const res = await request("/token", {
 				method: "POST",
 				headers: {

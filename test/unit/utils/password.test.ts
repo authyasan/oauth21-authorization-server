@@ -47,7 +47,7 @@ describe("存在しないユーザー用のダミーハッシュ", () => {
 		expect(bcrypt.getRounds(DUMMY_PASSWORD_HASH)).toBe(bcrypt.getRounds(userHash));
 	});
 
-	it("比較を最後まで行い、例外を投げない", async () => {
+	it("ダミーハッシュでのパスワード検証が例外なく完了する", async () => {
 		await expect(verifyDummyPassword("password123")).resolves.toBeUndefined();
 	});
 });

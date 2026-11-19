@@ -25,13 +25,11 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
 	c.header("X-Content-Type-Options", "nosniff");
 
 	// [SECURITY] URLクエリで運ぶtxnIdがRefererヘッダ経由で外部に漏れることを防ぐ
-	// （ログイン画面・同意画面はtxnIdをURLとフォームで運搬する）
 	c.header("Referrer-Policy", "no-referrer");
 
 	// CSP: インラインスクリプトを禁止し、同一オリジンのみ許可
 	// X-XSS-Protection は付けない。非標準で非推奨のヘッダーで、XSS対策はこのCSPが担う。
-	// [SECURITY] frame-ancestors 'none' がクリックジャッキング防止の主対策。
-	// これを外すと、同意画面を透明なiframeに重ねるクリックジャッキングが成立する
+	// [SECURITY] frame-ancestors 'none' で画面の埋め込みを拒否し、クリックジャッキングを防ぐ。
 	c.header(
 		"Content-Security-Policy",
 		"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",

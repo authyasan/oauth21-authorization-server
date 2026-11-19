@@ -14,10 +14,7 @@ import { SESSION_TTL_MS } from "../services/session-service.js";
 export const SESSION_COOKIE_NAME = process.env.NODE_ENV === "production" ? "__Host-sid" : "sid";
 
 /**
- * セッションCookieを設定する。セッションを作成・再生成したすべての経路で使う。
- *
- * @param c リクエストのコンテキスト
- * @param sessionId 設定するセッションID
+ * セッションの作成・再生成でCookieの属性がばらつかないよう、設定を共通化する。
  */
 export function setSessionCookie(c: Context, sessionId: string): void {
 	// #@range_begin(session-cookie) ※書籍掲載用の範囲マーカー

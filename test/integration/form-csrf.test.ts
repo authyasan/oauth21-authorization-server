@@ -154,7 +154,7 @@ function malformedTokenBody(kind: string, token: string): URLSearchParams | Form
 const invalidTokenCases = ["欠落", "空", "不一致", "重複", "配列名", "非ASCII", "File"];
 
 describe("ログインフォームのCSRF対策", () => {
-	it("直接GETでセッションを用意し、SIDではなく独立したトークンをフォームに渡す", async () => {
+	it("直接GETでセッションを用意し、SIDではなく独立したCSRFトークンをフォームに渡す", async () => {
 		const response = await app.request("/login");
 		const cookie = cookieFrom(response);
 		const html = await response.text();
@@ -177,7 +177,7 @@ describe("ログインフォームのCSRF対策", () => {
 		expect(renewed.csrfToken).not.toBe(form.csrfToken);
 	});
 
-	it("Cookieなしの攻撃者認証情報POSTは、攻撃者自身のトークンがあっても拒否する", async () => {
+	it("Cookieなしの攻撃者認証情報POSTは、攻撃者自身のCSRFトークンがあっても拒否する", async () => {
 		const attacker = await loginForm();
 		const response = await post("/login", loginBody(attacker.csrfToken));
 		expect(response.status).toBe(403);
@@ -200,21 +200,21 @@ describe("ログインフォームのCSRF対策", () => {
 		await expectNoAuthorization();
 	});
 
-	it("別セッションのトークンではログインできない", async () => {
+	it("別セッションのCSRFトークンではログインできない", async () => {
 		const victim = await loginForm();
 		const attacker = await loginForm();
 		expect((await post("/login", loginBody(attacker.csrfToken), victim.cookie)).status).toBe(403);
 		expect(getSession(sidFrom(victim.cookie))?.userId).toBeUndefined();
 	});
 
-	it("有効期限切れのセッションでは正しいトークンでもログインできない", async () => {
+	it("有効期限切れのセッションでは正しいCSRFトークンでもログインできない", async () => {
 		const form = await loginForm();
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.advanceTimersByTime(31 * 60 * 1000);
 		expect((await post("/login", loginBody(form.csrfToken), form.cookie)).status).toBe(403);
 	});
 
-	it("直接ログインが成功し、SIDとトークンが再生成される", async () => {
+	it("直接ログインが成功し、SIDとCSRFトークンが再生成される", async () => {
 		const form = await loginForm();
 		const response = await post("/login", loginBody(form.csrfToken), form.cookie);
 		expect(response.status).toBe(303);
@@ -250,7 +250,7 @@ describe("ログインフォームのCSRF対策", () => {
 		["testuser", "wrong", 401],
 		["unknown", "password123", 401],
 	] as const)(
-		"入力・認証失敗後も同じトークンで再送できる: %s",
+		"入力不備や認証失敗後も同じCSRFトークンで再送できる: %s",
 		async (username, password, status) => {
 			const start = await startAuthorization();
 			const body = new URLSearchParams({
@@ -271,7 +271,7 @@ describe("ログインフォームのCSRF対策", () => {
 		},
 	);
 
-	it("存在しないユーザーとパスワード不一致で、同じ応答を返す", async () => {
+	it("存在しないユーザーとパスワード不一致で、同じレスポンスを返す", async () => {
 		const start = await startAuthorization();
 		const attempt = async (username: string, password: string) => {
 			const body = new URLSearchParams({
@@ -309,7 +309,7 @@ describe("ログインフォームのCSRF対策", () => {
 
 describe.each(["approve", "deny"])("同意フォームのCSRF対策: %s", (decision) => {
 	it.each(invalidTokenCases)(
-		"トークン%sで認可リクエストを消費せず、正しいフォームで再送できる",
+		"CSRFトークン%sの同意リクエストを拒否しても、認可リクエストは残り再送できる",
 		async (kind) => {
 			const form = await consentForm();
 			const body = malformedTokenBody(kind, form.csrfToken);
@@ -340,7 +340,7 @@ describe.each(["approve", "deny"])("同意フォームのCSRF対策: %s", (decis
 		},
 	);
 
-	it("ログイン前・他セッションのトークンとCookieなしのPOSTを拒否する", async () => {
+	it("ログイン前・他セッションのCSRFトークンとCookieなしのPOSTを拒否する", async () => {
 		const form = await consentForm();
 		const other = await loginForm();
 		for (const token of [form.oldToken, other.csrfToken]) {
@@ -354,7 +354,7 @@ describe.each(["approve", "deny"])("同意フォームのCSRF対策: %s", (decis
 	});
 });
 
-it("複数タブの認可リクエストを引き継ぎ、同意POSTではトークンを消費しない", async () => {
+it("複数タブの認可リクエストを引き継ぎ、同意POSTではCSRFトークンを消費しない", async () => {
 	const first = await startAuthorization();
 	const second = await startAuthorization(first.cookie);
 	expect(second.csrfToken).toBe(first.csrfToken);

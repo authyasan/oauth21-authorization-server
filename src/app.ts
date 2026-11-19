@@ -11,18 +11,16 @@ import { securityHeaders } from "./middleware/security-headers.js";
 
 const app = new Hono();
 
-// グローバルミドルウェア
+// エンドポイントを組み合わせ、共通のレスポンスヘッダーと例外処理を適用する。
+// [SECURITY] 本文サイズの上限は省略しているため、第三者から受け付ける場合は解析前に制限する。
 app.use("*", securityHeaders);
 
-// グローバルエラーハンドラ
 app.onError(errorHandler);
 
-// ヘルスチェックエンドポイント
 app.get("/health", (c) => {
 	return c.json({ status: "ok" });
 });
 
-// 各エンドポイントをマウント
 app.route("/", createAuthorizeEndpoint());
 app.route("/", createLoginEndpoint());
 app.route("/", createTokenEndpoint());

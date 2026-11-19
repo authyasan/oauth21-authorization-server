@@ -1,5 +1,5 @@
 import { serverConfig } from "../config/server.js";
-import { db, type Transaction } from "../db/connection.js";
+import { db } from "../db/connection.js";
 import { lockActiveGrant, revokeGrant } from "../repositories/grant-repository.js";
 import {
 	classifyRefreshToken,
@@ -7,22 +7,19 @@ import {
 	findRefreshTokenByHash,
 	type RefreshTokenRecord,
 	revokeLiveRefreshTokensOfGrant,
-	setReplacedBy,
 } from "../repositories/token-repository.js";
 import type { ClientConfig } from "../types/client.js";
 import { sha256 } from "../utils/crypto.js";
 import { logger } from "../utils/logger.js";
 import { isValidScopeSyntax } from "../utils/validation.js";
-import { type IssuedToken, issueAccessToken } from "./token-service.js";
+import { type IssuedToken, issueTokens } from "./token-service.js";
 
 /**
- * リフレッシュトークンサービス。
+ * リフレッシュトークンによる更新処理。
  *
- * リフレッシュトークンはクライアント種別によらず発行する。
- * 更新のたびにローテーションする。
- * 応答の喪失に備え、消費から60秒の猶予窓を設ける。
- * 失効済み、または猶予期間を過ぎた使用済みリフレッシュトークンの提示を再利用として扱い、
- * grant 全体を失効させる。
+ * 提示されたRTの発行先を確認し、ローテーションで新しいAT・RTを発行する。
+ * レスポンスを受け取れなかったクライアントの再送には猶予期間を設ける。
+ * 再利用を検知した場合は、grantと関連するAT・RTを無効化する。
  */
 
 export interface VerifiedRefreshToken {
@@ -30,14 +27,12 @@ export interface VerifiedRefreshToken {
 }
 
 /**
- * 提示されたリフレッシュトークンの持ち主を確認する。
+ * 提示されたRTを検索し、発行先のクライアントと一致することを確認する。
  *
- * [SECURITY] ここで見るのは「そのトークンがこのクライアントのものか」だけである。
- * 使用済み・失効済み・期限切れの判定はここでは行わない。除外してしまうと、
- * 消費済みのトークンが提示されたことを検知できず、ローテーションが担う漏洩検知が
- * 成立しないためである。状態の判定は `rotateRefreshToken` が grant 行ロックの内側で行う。
+ * [SECURITY] 再利用検知に必要なため、使用済み・無効化済み・期限切れのRTも取得する。
+ * 状態の判定はrotateRefreshTokenで行う。
  *
- * @returns 見つかり、かつクライアントが一致すればトークンレコード。それ以外は null
+ * @returns 発行先が一致すれば{ tokenRecord }、見つからない場合や不一致の場合はnull
  */
 export async function verifyRefreshToken(params: {
 	refreshToken: string;
@@ -54,9 +49,8 @@ export async function verifyRefreshToken(params: {
 		return null;
 	}
 
-	// [SECURITY] 他のクライアントに発行されたトークンでの更新を拒む。
-	// 一致しない場合は失効させない。誤ったクライアントからの提示で正規の利用者を
-	// 巻き添えにしないためである（認可コードでも、事前検証に失敗した提示では失効させないのと同じ線引き）。
+	// [SECURITY] 他のクライアントに発行されたRTは拒否する。
+	// 誤ったクライアントからの提示で正規の利用を妨げないよう、無効化は行わない。
 	if (tokenRecord.clientId !== clientId) {
 		logger.warn("リフレッシュトークン検証: client_idが一致しない", {
 			expected: tokenRecord.clientId,
@@ -69,10 +63,10 @@ export async function verifyRefreshToken(params: {
 }
 
 /**
- * リフレッシュトークンのローテーション結果。
- * - success: 新しいアクセストークンとリフレッシュトークンを発行した（commit 済み）
- * - invalid_grant: 更新できなかった。再利用を検知した場合は grant を失効させたうえで返す
- * - invalid_scope: 要求されたスコープが元の認可範囲を超えていた
+ * リフレッシュトークンの更新結果。
+ * - success: 新しいAT・RTを発行し、DBへの保存をコミットした
+ * - invalid_grant: 更新を拒否した。再利用検知時はgrantと関連するAT・RTを無効化済み
+ * - invalid_scope: 要求されたスコープの構文が不正、またはgrantの範囲を超えている
  */
 export type RefreshRotationResult =
 	| { type: "success"; token: IssuedToken }
@@ -84,40 +78,25 @@ type RotationOutcome =
 	| { kind: "rotated"; token: IssuedToken }
 	| { kind: "grant_revoked" }
 	| { kind: "reuse_detected" }
-	| { kind: "expired" };
+	| { kind: "expired_or_not_found" };
 
 /**
- * スコープ超過でトランザクションを巻き戻すための内部シグナル。
+ * スコープ検証の失敗時にトランザクションを巻き戻すための例外。
  *
- * [SECURITY] スコープの検証はトークンの状態を確かめたあとに行う。
- * そのため検証に失敗する時点では、消費（used_at の記録）や猶予窓での失効が
- * すでにトランザクション内で行われている。これを投げて巻き戻すことで、
- * 不正なスコープの要求が正規のリフレッシュトークンを殺さないようにする。
+ * [SECURITY] 検証前に行ったRTの使用済み記録や無効化を取り消し、
+ * 誤ったスコープの要求によってRTが使えなくなることを防ぐ。
  */
 class ScopeExceededSignal extends Error {}
 
 /**
- * 検証済みのリフレッシュトークンを消費し、新しいトークンを発行する。
+ * 発行先の確認を終えたRTについて、状態とスコープを検証し、新しいAT・RTを発行する。
+ * 猶予期間内の再送は更新をやり直し、再利用を検知した場合は関連するgrantを無効化する。
  *
- * [SECURITY] 処理全体を grant 行のロック（FOR UPDATE）の内側で行う。ロックは2つの役割を持つ。
+ * [SECURITY] 同じgrantの更新・無効化と競合しないよう、grantをロックする。
+ * RTの状態確認・使用済み記録と、新しいAT・RTの保存は同じトランザクションで行う。
  *
- * 1. リフレッシュによるトークン発行と revokeGrant を直列化する。
- *    ロックがないと、grant 失効後に revoked_at=NULL のアクセストークンが生き残り、
- *    カスケード失効が競合下で破れる。
- * 2. 消費に失敗したときの分類と、猶予窓でのやり直しを同じ区間に収める。
- *    ロックを取り直す作りにすると、分類の時点で窓の内側だった要求が、
- *    ロック待ちのあいだに窓を出たまま処理されうる。
- *
- * ただしロックだけでは同一トークンの二重使用を直列化できない。ローテーションは
- * grants 行を書き換えないため、grant ロックの下でも「両方が消費できた」ことに
- * なってしまう。トークン行の原子的な消費（consumeRefreshTokenIfFresh）と両方が要る。
- *
- * grant の失効（revokeGrant）はトランザクションの外で行う。内側で呼ぶと、
- * 自分が保持している grant 行ロックを自分で待つことになる。
- *
- * @param params.tokenRecord verifyRefreshToken を通ったトークンレコード
- * @param params.requestedScope リクエストの scope パラメータ。
- *   省略時は grant のスコープとして扱う（draft-16 §4.3.1）。
+ * @param params.tokenRecord verifyRefreshTokenで発行先を確認したレコード
+ * @param params.requestedScope 要求されたスコープ。省略時はgrantのスコープを使う。
  */
 export async function rotateRefreshToken(params: {
 	tokenRecord: RefreshTokenRecord;
@@ -135,9 +114,7 @@ export async function rotateRefreshToken(params: {
 				return { kind: "grant_revoked" };
 			}
 
-			// 認可された範囲の権威は grant 行にある。scope が省略されたときの
-			// 既定値も、この行から取る（draft-16 §4.3.1 "if omitted is treated as equal to
-			// the scope originally granted by the resource owner"）。
+			// RTのスコープはgrantに保存しているため、要求で省略された場合はその値を使う。
 			const scope = requestedScope ?? activeGrant.scope;
 
 			// [SECURITY] トークン行の原子的な消費。1文の UPDATE で used_at を刻む。
@@ -151,36 +128,31 @@ export async function rotateRefreshToken(params: {
 					tx,
 				);
 
-				// 失効済み・猶予窓を過ぎた使用済みの提示は再利用として扱う。
-				if (state === "revoked" || state === "reused") {
+				// 無効化済み・猶予期間を過ぎた使用済みRTの提示は再利用として扱う。
+				if (state === "revoked" || state === "used_beyond_grace") {
 					return { kind: "reuse_detected" };
 				}
 
-				// 来歴を持たないまま有効期限に達したトークン。期限切れのトークン1つで正規の利用者を
-				// 追い出せないよう、失効はしない。
-				if (state !== "in_grace") {
-					return { kind: "expired" };
+				// 未使用・未無効化のまま期限切れになった場合や、レコードが見つからない場合は、
+				// grantを無効化せずに更新を拒否する。
+				if (state !== "used_within_grace") {
+					return { kind: "expired_or_not_found" };
 				}
 
-				// 猶予窓でのやり直しは、消費に成功する経路と違って
-				// consumeRefreshTokenIfFresh の期限判定を通らない。grant の絶対上限を
-				// ここで確かめないと、min(無操作期限, 絶対上限) が過去の時刻になり、
-				// 受け取った瞬間に期限切れのリフレッシュトークンを 200 で返してしまう。
+				// 猶予期間内の再送でも、RTの有効期限の絶対上限は延長しない。
+				// 期限切れのRTを新たに発行しないよう、ここでも上限を確認する。
 				if (isBeyondAbsoluteLimit(activeGrant.createdAt, activeGrant.now)) {
-					return { kind: "expired" };
+					return { kind: "expired_or_not_found" };
 				}
 
-				// 猶予窓の内側なので更新をやり直す。
-				// このとき失効させるのは、提示された旧トークンの直後の後継ではなく、
-				// そのとき grant に生きているトークンである（連鎖の分岐を防ぐ）。
+				// 更新をやり直してもRTの連鎖が分岐しないよう、
+				// 同じgrantの未使用・未無効化のRTを無効化してから、新しいRTを発行する。
 				await revokeLiveRefreshTokensOfGrant(tokenRecord.grantId, tx);
 			}
 
-			// [SECURITY] ここから先は発行する経路である。スコープの検証を
-			// この位置に置くのは、トークンの状態を確かめる前に返してしまうと、
-			// 盗まれた使用済みトークンを範囲外のスコープと一緒に提示するだけで
-			// 再利用検知をすり抜けられるためである。
-			// 超過していた場合は例外でトランザクションごと巻き戻し、消費をなかったことにする。
+			// [SECURITY] 範囲外のスコープを指定しても再利用検知を回避できないよう、
+			// RTの状態を判定してからスコープを検証する。
+			// 検証に失敗した場合は、例外でトランザクションを巻き戻す。
 			if (!isScopeWithinGrant(scope, activeGrant.scope)) {
 				logger.warn("リフレッシュトークン: 要求スコープが元のスコープを超えている", {
 					clientId: client.clientId,
@@ -190,7 +162,16 @@ export async function rotateRefreshToken(params: {
 				throw new ScopeExceededSignal();
 			}
 
-			const token = await issueTokens(tx, { tokenRecord, client, scope });
+			// 新しいRTも同じgrantに紐付け、更新できるスコープの上限を引き継ぐ。
+			const token = await issueTokens(
+				{
+					client,
+					userId: tokenRecord.userId,
+					scope,
+					grantId: tokenRecord.grantId,
+				},
+				tx,
+			);
 			return { kind: "rotated", token };
 		});
 	} catch (error) {
@@ -205,8 +186,9 @@ export async function rotateRefreshToken(params: {
 	}
 
 	if (outcome.kind === "reuse_detected") {
-		// [SECURITY] 再利用の検知 → grant 単位でカスケード失効。
-		// トランザクションの外で呼ぶ。この時点で grant 行ロックは解放されている。
+		// [SECURITY] 再利用を検知したため、grantと関連するAT・RTを無効化する。
+		// revokeGrantは別のトランザクションで同じgrantを更新するため、
+		// ここまでのトランザクションを終了してロックを解放してから呼び出す。
 		logger.warn("リフレッシュトークン: 再利用を検知したため grant を失効させる", {
 			clientId: client.clientId,
 			grantId: tokenRecord.grantId,
@@ -240,45 +222,9 @@ function isScopeWithinGrant(requestedScope: string, grantedScope: string): boole
 }
 
 /**
- * grant が絶対上限に達しているか。
- * 起点は grant の誕生であり、リフレッシュトークンの連鎖の起点ではない。
- *
- * [SECURITY] 現在時刻は grant 行のロックと一緒に DB から受け取ったものを使う。
- * アプリの時計で判定すると、DB クロックとのずれのぶんだけ上限が前後する。
- * 猶予窓や消費の判定と同じ時計にそろえるための引数である。
+ * grantの作成時刻を起点とする、RTの有効期限の絶対上限への到達を判定する。
+ * nowには、呼び出し元がDBから取得した時刻を渡す。
  */
 function isBeyondAbsoluteLimit(grantCreatedAt: Date, now: Date): boolean {
 	return grantCreatedAt.getTime() + serverConfig.refreshToken.absoluteTtl * 1000 <= now.getTime();
-}
-
-/**
- * 新しいアクセストークンとリフレッシュトークンを発行し、連鎖のポインタを張る。
- *
- * アクセストークンには要求されたスコープを持たせる。後継の
- * リフレッシュトークンはスコープを持たないので、縮小はそのときのアクセストークンにだけ効き、
- * 以後の更新の上限（grant のスコープ）は動かない。draft-16 §4.3.3 の
- * "the refresh token scope MUST be identical to that of the refresh token included
- * by the client in the request" は、提示されたトークンと後継が同じ grant を指すことで満たされる。
- */
-async function issueTokens(
-	tx: Transaction,
-	params: { tokenRecord: RefreshTokenRecord; client: ClientConfig; scope: string },
-): Promise<IssuedToken> {
-	const { tokenRecord, client, scope } = params;
-
-	const token = await issueAccessToken(
-		{
-			client,
-			userId: tokenRecord.userId,
-			scope,
-			grantId: tokenRecord.grantId,
-		},
-		tx,
-	);
-
-	// 消費したトークンから後継への前向きポインタを張る。
-	// 猶予窓でやり直した場合は、新しい後継に張り替わる。
-	await setReplacedBy(tokenRecord.id, token.refreshTokenId, tx);
-
-	return token;
 }

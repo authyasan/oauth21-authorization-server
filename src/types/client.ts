@@ -1,7 +1,6 @@
-// クライアントタイプ
 export type ClientType = "public" | "confidential";
 
-// クライアント定義
+// clients.jsonから読み込む登録情報。
 export interface ClientConfig {
 	clientId: string;
 	clientName: string;

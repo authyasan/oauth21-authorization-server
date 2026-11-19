@@ -9,14 +9,13 @@ import { verifyCodeChallenge } from "./pkce-service.js";
 /**
  * 認可コード検証サービス。
  *
- * ここでは「認可コードが構造的に正当か」だけを判定する（読み取り専用）。
- * 認可コードの一回限り消費・再利用検知・期限切れ判定・トークン発行は、原子性のため
- * exchangeAuthorizationCode（token-service）が消費と同一トランザクションで行う。
+ * コードの存在と、発行先のクライアント・リダイレクトURI・PKCEを検証する。
+ * 使用済み・期限切れの判定とトークン発行はexchangeAuthorizationCodeに委ねる。
  *
  * 使用済みコード再使用時のトークン無効化は、リクエストの
- * 他のパラメータ（client_id, 指定時のredirect_uri, code_verifier）が全て valid な
+ * 他のパラメータ（client_id, 指定時のredirect_uri, code_verifier）がすべて正しい
  * 場合に限る（OAuth 2.1 draft-16 §7.5.3のDoS対策）。本関数の事前検証を全て通過することが、
- * その「valid な再使用」の前提条件になる。不正パラメータはここで弾かれ、消費も失効も
+ * その前提条件になる。不正なパラメータはここで拒否し、コードの消費もトークンの無効化も
  * 起こさない。
  */
 
@@ -26,12 +25,6 @@ export interface VerifiedAuthorizationCode {
 
 /**
  * 認可コードを検証する（読み取り専用の事前検証）。
- *
- * 検証順序:
- * 1. コードの存在確認（SHA-256ハッシュでDB検索）
- * 2. client_id一致チェック
- * 3. redirect_uriが指定されている場合だけ一致チェック
- * 4. PKCE検証（code_verifier → SHA-256 → Base64URL → code_challenge一致）
  *
  * 使用済み・有効期限の判定はここでは行わない。原子的消費
  * （consumeAuthorizationCodeIfFresh）の UPDATE 条件
@@ -52,13 +45,12 @@ export async function verifyAuthorizationCode(params: {
 	const codeHash = sha256(code);
 	const codeRecord = await findAuthorizationCodeByHash(codeHash);
 
-	// 1. 存在確認
 	if (!codeRecord) {
 		logger.warn("認可コード検証: コードが存在しない", { clientId });
 		return null;
 	}
 
-	// 2. client_id一致チェック
+	// 発行先のクライアント以外によるコードの利用を拒否する。
 	if (codeRecord.clientId !== clientId) {
 		logger.warn("認可コード検証: client_idが一致しない", {
 			expected: codeRecord.clientId,
@@ -67,7 +59,7 @@ export async function verifyAuthorizationCode(params: {
 		return null;
 	}
 
-	// 3. [SECURITY] redirect_uriは指定時だけ完全一致で照合する。
+	// [SECURITY] redirect_uriは指定時だけ完全一致で照合する。
 	// トークンエンドポイントで空値を省略に正規化してから、この事前検証に渡す。
 	if (redirectUri !== undefined && codeRecord.redirectUri !== redirectUri) {
 		logger.warn("認可コード検証: redirect_uriが一致しない", {
@@ -76,7 +68,7 @@ export async function verifyAuthorizationCode(params: {
 		return null;
 	}
 
-	// 4. [SECURITY] PKCE検証
+	// [SECURITY] 認可コードだけを入手した第三者による交換を防ぐ。
 	if (
 		!verifyCodeChallenge(codeVerifier, codeRecord.codeChallenge, codeRecord.codeChallengeMethod)
 	) {

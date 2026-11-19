@@ -1,6 +1,6 @@
 // JWTアクセストークンのペイロード (RFC 9068準拠)
 export interface AccessTokenPayload {
-	jti: string; // トークン識別子（イントロスペクション用）
+	jti: string; // JWTとDBの記録を対応づけるトークン識別子
 	iss: string; // 認可サーバーのURL
 	sub: string; // ユーザー識別子
 	aud: string | string[]; // リソースサーバーのID（複数の場合は配列）

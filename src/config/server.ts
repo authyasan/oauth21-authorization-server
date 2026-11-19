@@ -39,7 +39,6 @@ export function validateIssuer(value: string, production: boolean): string {
 	return value;
 }
 
-// 認可サーバーの設定
 export const serverConfig = {
 	// 認可サーバーのissuer URL (JWTのissクレーム)
 	issuer: validateIssuer(
@@ -47,14 +46,12 @@ export const serverConfig = {
 		process.env.NODE_ENV === "production",
 	),
 
-	// サーバーのポートとホスト
 	port: Number(process.env.PORT) || 3000,
 	host: process.env.HOST || "localhost",
 
 	// アクセストークン有効期限（秒）
 	// クライアント種別・スコープによらず一律30分。
 	// JWTだけで検証するアクセスでは、無効化後も最大30分残ることを許容する選択。
-	// スコープ別に有効期間を変える設計も可能だが、本サンプルでは採用しない。
 	accessToken: {
 		ttl: 30 * 60, // 30分
 	},

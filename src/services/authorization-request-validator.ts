@@ -148,7 +148,6 @@ export function validateAuthorizationRequest(params: URLSearchParams): Validatio
 	}
 	// #@range_end(authorize-other-duplicates)
 
-	// response_type検証
 	const responseType = params.get("response_type");
 	if (!responseType) {
 		return redirectError("invalid_request", "Missing response_type parameter");
@@ -160,18 +159,17 @@ export function validateAuthorizationRequest(params: URLSearchParams): Validatio
 		);
 	}
 
-	// scopeが未指定の場合はエラー
 	const scopeString = params.get("scope");
 	if (!scopeString) {
 		return redirectError("invalid_scope", "Missing scope parameter");
 	}
 
-	// scopeに未登録値が含まれる場合は全体エラー
 	// [SECURITY] draft-16 §1.4.1のscope構文で検証し、空白を補正して受け入れない。
 	if (!isValidScopeSyntax(scopeString)) {
 		return redirectError("invalid_scope", "Invalid scope syntax");
 	}
 
+	// 許可されていないスコープを黙って除外せず、リクエスト全体を拒否する。
 	const unknownScopes = getUnknownScopes(scopeString.split(" "), client.allowedScopes);
 	if (unknownScopes.length > 0) {
 		return redirectError("invalid_scope", `Unknown scopes: ${unknownScopes.join(", ")}`);
@@ -205,8 +203,6 @@ export function validateAuthorizationRequest(params: URLSearchParams): Validatio
 			"Invalid code_challenge; expected 43 unpadded Base64url characters",
 		);
 	}
-
-	// 未知のパラメータは無視する
 
 	return {
 		type: "success",

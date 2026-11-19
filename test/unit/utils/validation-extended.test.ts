@@ -202,7 +202,7 @@ describe("isAllowedRedirectUriScheme", () => {
 		expect(isAllowedRedirectUriScheme("myapp://callback")).toBe(false);
 	});
 
-	// draft-16 §8.4.3 / RFC 8252 §7.1: private-use URI schemeはスラッシュ1つで書く
+	// draft-16 §8.4.3 / RFC 8252 §7.1の例にある、スキームの後がスラッシュ1つのURIも受け付ける。
 	it("スラッシュ1つの逆ドメイン名形式は許可される（仕様の例）", () => {
 		expect(isAllowedRedirectUriScheme("com.example.app:/oauth2redirect/example-provider")).toBe(
 			true,

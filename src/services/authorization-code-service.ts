@@ -4,20 +4,10 @@ import { createGrant } from "../repositories/grant-repository.js";
 import { generateRandomString, sha256 } from "../utils/crypto.js";
 
 /**
- * 認可コードサービス。
- * 認可コードの生成とDB保存を行う。
+ * 認可コードを生成し、grantとともにDBへ保存する。
  *
- * 認可コードは32バイト（256ビット）のCSPRNG出力。
- * 有効期限は5分。
- *
- * [SECURITY] 認可コードの生成フロー:
- * 1. 32バイトのランダム文字列を生成（平文コード）
- * 2. SHA-256ハッシュを計算してDBに保存
- * 3. 平文コードをクライアントにリダイレクトで返す
- * 4. トークンエンドポイントで受け取った平文コードをハッシュしてDB照合
- *
- * 平文コードはDBに保存しない。これにより、DB漏洩時に認可コードが
- * 直接漏れることを防ぐ。
+ * [SECURITY] DB漏洩時に認可コードが直接漏れないよう、ハッシュだけを保存する。
+ * 平文コードはクライアントへのレスポンス用に呼び出し元へ返す。
  */
 
 /** 認可コードの有効期限（5分） */
@@ -44,7 +34,7 @@ export async function issueAuthorizationCode(params: {
 	codeChallenge: string;
 	codeChallengeMethod: string;
 }): Promise<string> {
-	// [SECURITY] 32バイトのCSPRNG出力で認可コードを生成
+	// [SECURITY] 認可コードを推測されないよう、CSPRNGで生成する。
 	const code = generateRandomString(AUTHORIZATION_CODE_BYTES);
 
 	// [SECURITY] SHA-256ハッシュをDBに保存（平文は保存しない）
@@ -54,7 +44,6 @@ export async function issueAuthorizationCode(params: {
 	// （consumeAuthorizationCodeIfFresh）。単一ホスト構成では両者のずれは無視できる。
 	const expiresAt = new Date(Date.now() + AUTHORIZATION_CODE_LIFETIME_MS);
 
-	// grant 作成 → 認可コード保存を1トランザクションで行う
 	await db.transaction(async (tx) => {
 		const grantId = await createGrant(
 			{
@@ -76,6 +65,5 @@ export async function issueAuthorizationCode(params: {
 		);
 	});
 
-	// 平文コードをクライアントに返す
 	return code;
 }

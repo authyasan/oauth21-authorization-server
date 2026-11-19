@@ -34,7 +34,6 @@ import { LoginPage } from "../views/login.js";
 export function createLoginEndpoint() {
 	const app = new Hono();
 
-	// GET /login: ログインフォーム表示
 	app.get("/login", (c) => {
 		const txnId = c.req.query("txnId");
 
@@ -62,7 +61,6 @@ export function createLoginEndpoint() {
 		return c.html(<LoginPage txnId={txnId} csrfToken={session.csrfToken} />);
 	});
 
-	// POST /login: ログイン処理
 	app.post("/login", async (c) => {
 		const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 		const session = sessionId ? getSession(sessionId) : null;
@@ -79,7 +77,6 @@ export function createLoginEndpoint() {
 			return c.html(<ErrorPage />, 400);
 		}
 
-		// 入力バリデーション
 		if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
 			return c.html(
 				<LoginPage
@@ -91,7 +88,6 @@ export function createLoginEndpoint() {
 			);
 		}
 
-		// ユーザー検索
 		const user = await findUserByUsername(username);
 
 		// [SECURITY] ユーザーが存在しない場合もパスワード検証を行い、
@@ -110,7 +106,6 @@ export function createLoginEndpoint() {
 			);
 		}
 
-		// パスワード検証
 		const isValid = await verifyPassword(password, user.passwordHash);
 		if (!isValid) {
 			logger.warn("ログイン失敗: パスワード不一致", { username });
@@ -129,7 +124,6 @@ export function createLoginEndpoint() {
 			return c.html(<ErrorPage />, 403);
 		}
 
-		// ログイン成功
 		logger.info("ログイン成功", { userId: user.id, username });
 
 		// #@range_begin(login-session-rebind) ※書籍掲載用の範囲マーカー
@@ -139,13 +133,11 @@ export function createLoginEndpoint() {
 		// CSRFトークンもcreateSessionで新しく生成する。
 		const newSessionId = createSession();
 
-		// [SECURITY] 旧 sid に紐づけて保存した認可リクエストの boundSid を、新 sid に張り替える。
-		// これによりログイン後の /authorize?txnId=... で boundSid 検証を通せる。
+		// [SECURITY] 認可リクエストを新しいセッションへ紐付け直し、ログイン後も同じブラウザで続行できるようにする。
 		rebindAuthorizationRequests(oldSessionId, newSessionId);
 		deleteSession(oldSessionId);
 		// #@range_end(login-session-rebind)
 
-		// 新しいセッションにユーザーIDと認証時刻を記録
 		updateSession(newSessionId, {
 			userId: user.id,
 			authenticatedAt: new Date(),
@@ -159,7 +151,6 @@ export function createLoginEndpoint() {
 			return c.redirect(`/authorize?txnId=${encodeURIComponent(txnId)}`, 303);
 		}
 
-		// 認可フロー以外からのログインの場合
 		return c.redirect("/", 303);
 	});
 

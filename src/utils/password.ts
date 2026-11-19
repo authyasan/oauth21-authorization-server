@@ -2,18 +2,11 @@ import bcrypt from "bcryptjs";
 import { generateRandomString } from "./crypto.js";
 
 /**
- * パスワードハッシュのユーティリティ。
- *
- * [SECURITY] パスワードは低エントロピー（人間が作成）であるため、
- * SHA-256のような高速ハッシュではなく、意図的に低速なbcryptを使用する。
- * 高速ハッシュでは攻撃者が1秒間に数十億回の試行が可能になるが、
- * bcryptはコストファクターにより1回のハッシュに意図的な遅延を入れる。
+ * [SECURITY] 人が決めるパスワードへの総当たりを遅くするため、bcryptを使う。
  */
 
 /**
- * bcryptのコストファクター（ラウンド数）。
- * 2^COST_FACTOR 回のハッシュ計算を行う。
- * 10 = 2^10 = 1024ラウンド（一般的なデフォルト値）
+ * パスワード保存とダミーハッシュで同じ計算コストを使う。
  */
 const COST_FACTOR = 10;
 
@@ -31,8 +24,7 @@ export async function hashPassword(password: string): Promise<string> {
 /**
  * 平文パスワードとbcryptハッシュを比較する。
  *
- * [SECURITY] bcrypt.compareは内部で定数時間比較を行うため、
- * タイミング攻撃に対して安全。
+ * [SECURITY] 保存済みハッシュとの照合はbcrypt.compareに委ねる。
  *
  * @param password 検証する平文パスワード
  * @param hash 保存されたbcryptハッシュ

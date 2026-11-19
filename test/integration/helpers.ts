@@ -4,26 +4,36 @@ import type { Hono } from "hono";
 import postgres from "postgres";
 import * as schema from "../../src/db/schema.js";
 import { sha256Base64url } from "../../src/utils/crypto.js";
+import { assertTestCleanupDatabaseName, DEFAULT_INTEGRATION_DATABASE_URL } from "./db-guard.js";
 
 // テスト用DB接続
 const TEST_DATABASE_URL =
-	process.env.DATABASE_URL || "postgresql://oauth21:oauth21_dev_password@localhost:5432/oauth21";
+	process.env.DATABASE_URL || DEFAULT_INTEGRATION_DATABASE_URL;
 
 const testClient = postgres(TEST_DATABASE_URL);
 export const testDb = drizzle(testClient, { schema });
 
+/** 初期化失敗後の後片付けでも誤削除しないよう、削除直前の実DB名を確認する。 */
+async function assertCleanupDatabase(): Promise<void> {
+	// E2Eの/resetでも共用するため、E2E専用DBも許可する。
+	const rows = await testDb.execute<{ name: string }>(sql`select current_database() as name`);
+	assertTestCleanupDatabaseName(rows[0]?.name ?? "");
+}
+
 /** テスト用の障害注入だけを除去する。途中でCREATEが失敗した場合も再実行できる。 */
 export async function cleanupTokenSaveFailureInjection(): Promise<void> {
+	await assertCleanupDatabase();
 	await testDb.execute(sql`DROP TRIGGER IF EXISTS test_fail_rt_insert ON refresh_tokens`);
 	await testDb.execute(sql`DROP FUNCTION IF EXISTS test_fail_rt_insert()`);
 	await testDb.execute(sql`DROP SEQUENCE IF EXISTS test_rt_insert_at_count`);
 }
 
 /**
- * テスト用: 全テーブルのデータをクリアする。
+ * テスト用: 以下の対象テーブルのデータを削除する。
  * 外部キー制約を考慮した順序で削除する。
  */
 export async function cleanupDatabase(): Promise<void> {
+	await assertCleanupDatabase();
 	// 異常終了で残ったトリガーが、次回の別テストのRT発行を妨げないよう先に除去する。
 	await cleanupTokenSaveFailureInjection();
 	// 外部キー順: トークン・認可コード（grants を参照）→ grants → consents → users
@@ -44,15 +54,13 @@ export async function closeDatabase(): Promise<void> {
 
 /**
  * テスト用ユーザーを作成する。
- * bcryptハッシュを事前計算済みで使用する。
+ * 指定されたパスワード（省略時はpassword123）をハッシュ化して保存する。
  */
 export async function createTestUser(params?: {
 	username?: string;
 	password?: string;
 }): Promise<{ id: string; username: string }> {
 	const username = params?.username ?? "testuser";
-	// bcryptハッシュ: "password123" のハッシュ（コスト10）
-	// テスト速度のため事前計算済み
 	const { hashPassword } = await import("../../src/utils/password.js");
 	const passwordHash = await hashPassword(params?.password ?? "password123");
 
@@ -104,7 +112,8 @@ export function generatePkce(): {
 }
 
 /**
- * Basic認証ヘッダーを生成する。
+ * テスト用のBasic認証ヘッダーを生成する。
+ * 入力はフォームエンコードせず、そのままコロンで連結してBase64化する。
  */
 export function basicAuthHeader(username: string, password: string): string {
 	const encoded = Buffer.from(`${username}:${password}`).toString("base64");
@@ -112,7 +121,7 @@ export function basicAuthHeader(username: string, password: string): string {
 }
 
 /**
- * 認可リクエストのURLを構築する。
+ * 認可リクエストのパスとクエリを返す。localhostはURL編集用で、戻り値には含めない。
  */
 export function buildAuthorizeUrl(params: {
 	clientId: string;
@@ -146,8 +155,7 @@ export function getRedirectParams(response: Response): URLSearchParams {
 }
 
 /**
- * Location ヘッダーまたは URL から ?txnId=... パラメータを抽出する。
- * 認可リクエストは 認可リクエストの保存先で参照される。
+ * レスポンスのLocationヘッダーから、保存済みの認可リクエストを参照するtxnIdを取得する。
  */
 export function extractTxnIdFromLocation(response: Response): string {
 	const params = getRedirectParams(response);

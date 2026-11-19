@@ -68,7 +68,7 @@ describe("本番環境のセッションCookie名", () => {
 	});
 
 	it("接頭辞のない sid は読まない（注入されたセッションでログインさせない）", async () => {
-		// 攻撃者が自分のセッションとトークンを取得し、そのIDを接頭辞なしの sid として被害者に注入した場合。
+		// 攻撃者のセッション識別子をsidというCookie名で注入し、攻撃者のCSRFトークンとともに送る。
 		const attacker = await loginForm();
 		const attackerSid = hostCookieFrom(attacker.response).slice("__Host-sid=".length);
 		const injected = `sid=${attackerSid}`;

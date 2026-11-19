@@ -5,7 +5,6 @@ import { getAudienceForScopes } from "./resource-server.js";
 
 // 動的登録はスコープ外のため、設定読み込み時に登録URIを検証する。
 // HTTPSの受信先が正規クライアントの管理下にあることは、管理者が登録前に確認する。
-// 以下の構文検証は、受信先の管理者を確認するものではない。
 export function createClientMap(clients: ClientConfig[]): Map<string, ClientConfig> {
 	const clientMap = new Map<string, ClientConfig>();
 	for (const client of clients) {

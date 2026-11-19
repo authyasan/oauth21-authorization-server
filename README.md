@@ -143,7 +143,19 @@ npm run dev                     # 開発サーバー起動
 
 ## テスト
 
-次はホストのNode.js環境で実行するコマンドです。結合テストはDBのデータを初期化します。既定では`localhost:5432/oauth21`へ接続するため、保存したいデータがあるDBでは実行しないでください。接続先は`vitest.integration.config.ts`を確認してください。
+次はホストのNode.js環境で実行するコマンドです。結合テストには専用DB `oauth21_integration_test`を使い、テストごとにデータを初期化します。動作確認用の`oauth21`とは分けています。付録Aの`compose.quickstart.yaml`による起動・停止手順は変更ありません。
+
+結合テストの初回実行前に、ホスト実行用のPostgreSQLを起動し、専用DBとテーブルを作成してください。`createdb`は初回だけ実行します。
+
+```bash
+docker compose -f docker-compose.yml up -d
+docker compose -f docker-compose.yml exec postgres createdb -U oauth21 oauth21_integration_test
+DATABASE_URL=postgresql://oauth21:oauth21_dev_password@localhost:5432/oauth21_integration_test npm run db:push
+```
+
+ホスト実行用の依存パッケージと署名鍵も必要です。前節の手順で準備済みなら、再生成は不要です。ユーザーなどのデータはテスト内で作成するため、専用DBへの`db:seed`は不要です。
+
+結合テストは通常起動用の`DATABASE_URL`を引き継ぎません。接続先のホスト・ポート・認証情報を変える場合は`INTEGRATION_DATABASE_URL`を指定してください。DB名は`oauth21_integration_test`に固定し、クエリ付きのURLは受け付けません。設定に加えて実際のDB名もテスト初期化前に確認します。
 
 ```bash
 npm test                        # ユニットテスト（Vitest）

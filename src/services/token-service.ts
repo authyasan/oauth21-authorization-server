@@ -14,25 +14,11 @@ import type { ClientConfig } from "../types/client.js";
 import { generateRandomString, sha256 } from "../utils/crypto.js";
 
 /**
- * トークンサービス。
- * JWTアクセストークンの生成を行う。
+ * アクセストークンとリフレッシュトークンの発行を行う。
  *
- * jtiは16バイト（128ビット）。衝突回避が目的で推測攻撃の対象にならない。
- * RS256 (RSASSA-PKCS1-v1_5 + SHA-256) で署名する。RFC 9068 §2.1 が、準拠する認可サーバーと
- * リソースサーバーに RS256 のサポートを求めているため採用する（RFC 7518 §3.1 での区分は Recommended）。
- * RFC 9068準拠の最小クレーム + scope。
- *
- * JWTペイロード:
- * {
- *   jti: トークン識別子（イントロスペクション・リボケーション用）
- *   iss: 認可サーバーのURL
- *   sub: ユーザー識別子
- *   aud: リソースサーバーID（発行時にスコープから逆引きし、DBにも保存。複数の場合は配列）
- *   client_id: クライアント識別子
- *   scope: 許可されたスコープ
- *   iat: 発行時刻
- *   exp: 有効期限
- * }
+ * 認可コードとの交換処理も担当し、認可コードの使用済み記録と
+ * トークン発行を同一トランザクションで行う。
+ * 使用済み認可コードの再利用を検知した場合は、grantと関連するトークンを無効化する。
  */
 
 /** jtiのバイト長（16バイト = 128ビット） */
@@ -46,22 +32,21 @@ export interface IssuedToken {
 	expiresIn: number;
 	scope: string;
 	refreshToken: string;
-	/** 発行したリフレッシュトークンの行ID。ローテーションで replaced_by を張るために使う */
-	refreshTokenId: string;
 }
 
 /**
- * JWTアクセストークンを発行する。
+ * JWTアクセストークンとリフレッシュトークンを発行する。
  *
  * @param params.client クライアント設定
- * @param params.userId ユーザーID
- * @param params.scope 許可されたスコープ
- * @param params.grantId この AT が属する grant のID（カスケード失効用の grouping key）
- * @param executor トランザクションハンドル（省略時は通常のdb接続）。
- *   認可コードグラントでは消費 UPDATE と同一トランザクションを渡す。
- * @returns 発行されたアクセストークンとメタデータ
+ * @param params.userId ユーザー識別子
+ * @param params.scope アクセストークンに付与するスコープ
+ * @param params.grantId 発行するAT・RTが属するgrantの識別子
+ * @param executor DB操作に使う接続またはトランザクション（省略時はdb）。
+ *   認可コードやRTの使用済み記録とトークン保存をまとめて確定するため、
+ *   呼び出し元のトランザクションを渡す。
+ * @returns 発行されたアクセストークン・リフレッシュトークンとメタデータ
  */
-export async function issueAccessToken(
+export async function issueTokens(
 	params: {
 		client: ClientConfig;
 		userId: string;
@@ -72,27 +57,27 @@ export async function issueAccessToken(
 ): Promise<IssuedToken> {
 	const { client, userId, scope, grantId } = params;
 
-	// 16バイトのjtiを生成
+	// アクセストークンを識別するjtiは、衝突を避けるため128ビットの乱数から生成する。
 	const jti = generateRandomString(JTI_BYTES);
 
-	// クライアント種別・スコープによらず一律30分
+	// クライアント種別・スコープによらず、同じ有効期間を使う。
 	const expiresIn = serverConfig.accessToken.ttl;
 
 	const now = Math.floor(Date.now() / 1000);
 	const expiresAt = new Date((now + expiresIn) * 1000);
 
-	// JWT署名鍵を取得
 	const privateKey = await getPrivateKey();
 	const kid = getKid();
 
 	// #@range_begin(sign-jwt) ※書籍掲載用の範囲マーカー
-	// RFC 9068準拠の最小クレーム + scope
-	// audはスコープに対応するリソースサーバーIDから決定する。
-	// 複数リソースサーバーが該当する場合は配列で設定される。
+	// 本サンプルでは、スコープに対応するリソースサーバーの識別子をaudに設定する。
+	// 対象が1つなら文字列、複数なら配列にする。
 	const scopes = scope.split(" ");
 	const audiences = getAudienceForScopes(scopes);
 	const aud = audiences.length === 1 ? audiences[0] : audiences;
 
+	// RFC 9068 §2.2で必須のクレームにscopeを加える。
+	// 署名にはRS256を使う。
 	const accessToken = await new SignJWT({
 		scope,
 		client_id: client.clientId,
@@ -107,9 +92,8 @@ export async function issueAccessToken(
 		.sign(privateKey);
 	// #@range_end(sign-jwt)
 
-	// アクセストークンのメタデータをDBに保存（リボケーション・イントロスペクション用）
-	// JWT の aud に入れたものと同じ集合を保存する。
-	// イントロスペクションは設定から計算し直さず、この値で照会元RSを判定し、応答の aud にも使う。
+	// アクセストークンの無効化とイントロスペクションに使う情報をDBに保存する。
+	// audは設定変更後もJWTと食い違わないよう、発行時の値を保存する。
 	// #@range_begin(save-access-token)
 	await saveAccessToken(
 		{
@@ -126,11 +110,9 @@ export async function issueAccessToken(
 	// #@range_end(save-access-token)
 
 	// リフレッシュトークンはクライアント種別によらず発行する。
-	// リフレッシュトークンにスコープは持たせない。更新できる範囲は
-	// grant 行にあり、アクセストークンのスコープを縮めてもそこは動かない。
-	// draft-16 §4.3.3 の「後継のスコープは提示されたリフレッシュトークンと同一」という MUST は、
-	// 両者が同じ grant を指すことで自動的に満たされる。
-	const refresh = await issueRefreshToken(
+	// リフレッシュトークンのスコープは、紐付くgrantから参照する。
+	// アクセストークンのスコープを狭めても、grantのスコープは変更しない。
+	const refreshToken = await issueRefreshToken(
 		{
 			grantId,
 			clientId: client.clientId,
@@ -143,29 +125,19 @@ export async function issueAccessToken(
 		accessToken,
 		expiresIn,
 		scope,
-		refreshToken: refresh.token,
-		refreshTokenId: refresh.id,
+		refreshToken,
 	};
 }
 
 /**
- * リフレッシュトークンを生成し、DBに保存する。
+ * リフレッシュトークンを生成し、ハッシュ値と関連情報をDBに保存する。
  *
- * 有効期限は「無操作30日」と「grant 誕生から絶対上限180日」の小さいほう。
- * 無操作期限は更新のたびに引き直されるので、使われ続けている限りトークンは生き続ける。
- * 絶対上限は放置された grant を掃除するためのもので、更新では延びない。
- * 再利用検知は正規の利用者と攻撃者の両方が使ったときにしか発火しないため、
- * 利用者が使わなくなった grant を無期限に延ばさない仕組みが要る。
+ * 有効期限は、発行時点からの無操作期限と、grant作成時点からの
+ * 絶対期限のうち、早い方とする。RTを更新しても絶対期限は延長しない。
  *
- * 更新のたびにローテーションする。
+ * [SECURITY] 平文のトークンはDBに保存せず、呼び出し元に返す。
  *
- * [SECURITY] リフレッシュトークンの生成フロー:
- * 1. 32バイトのランダム文字列を生成（平文トークン）
- * 2. SHA-256ハッシュを計算してDBに保存
- * 3. 平文トークンをクライアントに返す
- * 4. リフレッシュ時に受け取った平文トークンをハッシュしてDB照合
- *
- * @returns 平文のリフレッシュトークンと、その行ID
+ * @returns 平文のリフレッシュトークン
  */
 async function issueRefreshToken(
 	params: {
@@ -174,16 +146,13 @@ async function issueRefreshToken(
 		userId: string;
 	},
 	executor: Executor = db,
-): Promise<{ token: string; id: string }> {
-	// [SECURITY] 32バイトの暗号論的乱数でリフレッシュトークンを生成
+): Promise<string> {
+	// [SECURITY] リフレッシュトークンの推測を困難にするため、32バイトの暗号論的乱数から生成する。
 	const token = generateRandomString(REFRESH_TOKEN_BYTES);
 
-	// [SECURITY] SHA-256ハッシュをDBに保存（平文は保存しない）
+	// [SECURITY] DB漏洩時にリフレッシュトークンがそのまま使われないよう、ハッシュ値を保存する。
 	const tokenHash = sha256(token);
 
-	// min(now + 無操作30日, grant.created_at + 絶対上限180日)
-	// 期限はアプリの時計で計算して書く。期限の判定は消費時に DB の時計で行う
-	// （consumeRefreshTokenIfFresh）。単一ホスト構成では両者のずれは無視できる。
 	const grantCreatedAt = await getGrantCreatedAt(params.grantId, executor);
 	if (!grantCreatedAt) {
 		throw new Error(`grant が見つかりません: ${params.grantId}`);
@@ -192,7 +161,7 @@ async function issueRefreshToken(
 	const absoluteExpiry = grantCreatedAt.getTime() + serverConfig.refreshToken.absoluteTtl * 1000;
 	const expiresAt = new Date(Math.min(idleExpiry, absoluteExpiry));
 
-	const id = await saveRefreshToken(
+	await saveRefreshToken(
 		{
 			tokenHash,
 			...params,
@@ -201,44 +170,42 @@ async function issueRefreshToken(
 		executor,
 	);
 
-	return { token, id };
+	return token;
 }
 
 /**
  * 認可コード交換の結果。
- * - success: トークン発行に成功（commit 済み）
- * - invalid_grant: コードが無効（再利用・期限切れ・並行交換で先を越された等）
+ * - success: 認可コードの使用済み記録とトークン保存をDBにコミット済み
+ * - invalid_grant: 認可コードが無効（使用済み・期限切れ・レコード不在）
  */
 export type AuthorizationCodeExchangeResult =
 	| { type: "success"; token: IssuedToken }
 	| { type: "invalid_grant" };
 
 /**
- * 事前検証済みの認可コードをトークンに交換する（原子的 consume ＋ 発行）。
+ * 認可コードと引き換えにアクセストークンとリフレッシュトークンを発行する。
+ * 使用済み認可コードの再利用を検知した場合は、grantと関連するAT・RTを無効化する。
  *
- * [SECURITY] 消費と発行の原子性:
- * 認可コードの消費（used_at 刻み）とアクセストークン／リフレッシュトークンの保存を
- * 同一トランザクションで行う。これにより、同一コードの並行交換において
- * 「敗者が grant を失効させた後に、勝者が失効対象外の新トークンを挿入して生き残る」
- * 順序を排除する。勝者は authorization_codes 行ロックを保持したままトークンを INSERT して
- * commit するため、敗者の consume は 0 行になり、その後の再利用検知（revokeGrant）は
- * commit 済みの勝者トークンを確実に巻き込んで失効できる。
+ * 呼び出し前の条件:
+ * クライアントの識別・種別に応じた認証、および認可コードの存在、
+ * クライアント識別子、指定されたredirect_uri、PKCEの検証を済ませておく。
+ * [SECURITY] 認可コードだけを入手した攻撃者による、
+ * 関連トークンの巻き添え無効化を防ぐため、これらの検証は無効化より先に行う。
  *
- * 0 行（消費できなかった）場合は最新の used_at を読み直して分類する:
- * - used_at が刻まれている → 正規パラメータでの再利用 → grant 単位で失効（OAuth 2.1 §7.5.2 SHOULD）
- * - used_at が NULL（＝期限切れ／存在しない） → 失効はしない（不正なリクエストによる巻き添え失効を防ぐ DoS 対策）
+ * [SECURITY] 認可コードの使用済み記録とトークン保存は、
+ * 同一トランザクションで確定し、途中で失敗した場合は両方を巻き戻す。
  *
- * このコードに到達する時点で client_id / 指定時の redirect_uri / PKCE は検証済みであること。
- * それが「valid な再使用リクエスト」の前提であり、不正パラメータでの巻き添え
- * 失効を防ぐ。
+ * 再利用時の拒否と発行済みAT・RTの無効化については、
+ * OAuth 2.1 draft-16 §4.1.3・§7.5.3を参照。
  *
- * [SECURITY] 現行のHTTP経路では、認可コードの初回交換前にgrantを無効化できない。
- * その経路を追加する場合は、消費・発行と同じトランザクション内でgrantをロックして
- * 有効性を確認し、無効化済みなら発行を拒否すること。
+ * [SECURITY] 将来、管理機能などから認可コードの初回交換前にgrantを
+ * 無効化できるようにする場合は、交換時にgrantの有効性も確認すること。
  *
  * @param params.codeRecord 事前検証済みの認可コードレコード
  * @param params.client クライアント設定
- * @returns 成功時は発行トークン、失敗時は invalid_grant
+ * @returns DBへの保存確定後の発行トークン、
+ * または認可コードが使用済み・期限切れ・レコード不在の場合はinvalid_grant
+ * @throws DB操作やトークン生成などの例外は呼び出し元へ伝播する
  */
 export async function exchangeAuthorizationCode(params: {
 	codeRecord: AuthorizationCodeRecord;
@@ -246,14 +213,15 @@ export async function exchangeAuthorizationCode(params: {
 }): Promise<AuthorizationCodeExchangeResult> {
 	const { codeRecord, client } = params;
 
-	// [SECURITY] 原子的 consume ＋ トークン発行を同一トランザクションで実行する。
-	// consume が成功した場合のみトークンを発行し、両者を同時に commit する。
+	// [SECURITY] 未使用かつ期限内の認可コードだけを使用済みに更新する。
+	// 同じ認可コードへの更新は行ロックで待機するため、並行して二重発行しない。
+	// ロックはトークン保存のコミットまで保持し、再利用時の無効化が保存より先になるのを防ぐ。
 	const token = await db.transaction(async (tx) => {
 		const consumed = await consumeAuthorizationCodeIfFresh(codeRecord.id, tx);
 		if (!consumed) {
 			return null;
 		}
-		return await issueAccessToken(
+		return await issueTokens(
 			{
 				client,
 				userId: codeRecord.userId,
@@ -264,18 +232,18 @@ export async function exchangeAuthorizationCode(params: {
 		);
 	});
 
-	// commit 成功後にのみ成功とみなす。
-	// （トランザクション内でレスポンスを組み立てないことで、commit 失敗時に
-	//  DB 上存在しない「幽霊トークン」をクライアントへ返す事故を防ぐ）
+	// DBへのコミットが成功してから発行結果を返す。
+	// コミットに失敗した場合は例外となり、保存できなかったトークンを返さない。
 	if (token) {
 		return { type: "success", token };
 	}
 
-	// [SECURITY] 消費できなかった（0 行）→ 再利用か期限切れかを最新状態で再分類する。
-	// この時点で勝者は commit 済みなので、再利用なら revokeGrant が勝者トークンを巻き込める。
+	// [SECURITY] 認可コードを使用済みにできなかった場合は、DBから読み直して再利用を判定する。
+	// 別の処理が同じ認可コードを更新中なら、前段のUPDATEは行ロックにより、そのトランザクションの終了を待つ。
+	// その処理がコミットした場合、発行したAT・RTも保存済みなので、再利用の検知時に無効化できる。
 	const latest = await findAuthorizationCodeById(codeRecord.id);
 	if (latest?.usedAt) {
-		// 正規パラメータによる使用済みコードの再利用 → grant 単位で失効
+		// 事前検証を通過したリクエストによる再利用なので、grantと関連トークンを無効化する。
 		await revokeGrant(codeRecord.grantId);
 	}
 

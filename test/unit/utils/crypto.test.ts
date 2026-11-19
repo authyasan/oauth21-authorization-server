@@ -7,13 +7,13 @@ import {
 } from "../../../src/utils/crypto.js";
 
 describe("generateRandomString", () => {
-	it("デフォルト32バイトのランダム文字列を生成する", () => {
+	it("既定の32バイトから43文字の文字列を生成する", () => {
 		const str = generateRandomString();
 		// 32バイト = Base64URLで43文字
 		expect(str.length).toBe(43);
 	});
 
-	it("指定したバイト数のランダム文字列を生成する", () => {
+	it("16バイトを指定すると22文字の文字列を生成する", () => {
 		const str = generateRandomString(16);
 		// 16バイト = Base64URLで22文字
 		expect(str.length).toBe(22);
@@ -39,7 +39,7 @@ describe("sha256", () => {
 		expect(hash).toBe("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
 	});
 
-	it("空文字列のハッシュ", () => {
+	it("空文字列のSHA-256ハッシュが既知の値と一致する", () => {
 		const hash = sha256("");
 		expect(hash).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 	});
@@ -48,7 +48,7 @@ describe("sha256", () => {
 		expect(sha256("test")).toBe(sha256("test"));
 	});
 
-	it("異なる入力には異なるハッシュを返す", () => {
+	it("入力aとbでは異なるハッシュを返す", () => {
 		expect(sha256("a")).not.toBe(sha256("b"));
 	});
 });

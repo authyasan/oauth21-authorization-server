@@ -1,9 +1,7 @@
 import type { ResourceServerConfig } from "../types/resource-server.js";
 import resourcesData from "./resource-server.json" with { type: "json" };
 
-// リソースサーバー設定を読み込む
-// クライアント設定（clients.json）とは明示的に分離する。
-// OAuthにおいてクライアントとリソースサーバーは異なる役割であるため。
+// リソースを提供する側の設定は、アクセスする側のクライアント設定と分けて管理する。
 const resourceServerMap = new Map<string, ResourceServerConfig>();
 
 for (const rs of resourcesData as ResourceServerConfig[]) {

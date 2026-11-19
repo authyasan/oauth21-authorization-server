@@ -25,7 +25,7 @@ describe("セキュリティヘッダーミドルウェア", () => {
 		},
 	);
 
-	it("想定外の例外による500応答も no-store で、Pragma は付けない", async () => {
+	it("想定外の例外による500レスポンスも no-store で、Pragma は付けない", async () => {
 		// app.ts と同じ組み合わせ（全体のミドルウェアとエラーハンドラ）で、例外を投げる経路を再現する
 		const failing = new Hono();
 		failing.use("*", securityHeaders);

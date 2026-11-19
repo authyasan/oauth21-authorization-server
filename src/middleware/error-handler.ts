@@ -10,6 +10,7 @@ import { logger } from "../utils/logger.js";
  * OAuthError を throw してここで変換する経路は持たない。
  */
 export function errorHandler(err: Error, c: Context): Response {
+	// [SECURITY] DB例外にはSQL引数も含まれるため、ログに残せない値を扱う場合は出力項目を制限する。
 	logger.error("予期しないエラー", {
 		message: err.message,
 		stack: err.stack,

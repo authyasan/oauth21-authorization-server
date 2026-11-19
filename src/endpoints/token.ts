@@ -87,17 +87,14 @@ export function createTokenEndpoint() {
 
 		const grantType = body.grant_type;
 
-		// grant_type必須チェック
 		if (!grantType) {
 			return tokenErrorResponse(c, invalidRequest("Missing grant_type parameter"));
 		}
 
-		// authorization_codeとrefresh_tokenのみ対応
 		if (grantType !== "authorization_code" && grantType !== "refresh_token") {
 			return tokenErrorResponse(c, unsupportedGrantType(`Unsupported grant_type: ${grantType}`));
 		}
 
-		// --- 共通: クライアント認証 ---
 		const authResult = authenticateClient(
 			c.req.header("Authorization"),
 			body.client_id,
@@ -116,12 +113,10 @@ export function createTokenEndpoint() {
 
 		const { client } = authResult;
 
-		// --- authorization_code グラント ---
 		if (grantType === "authorization_code") {
 			return handleAuthorizationCodeGrant(c, body, client);
 		}
 
-		// --- refresh_token グラント ---
 		return handleRefreshTokenGrant(c, body, client);
 	});
 
@@ -202,15 +197,15 @@ async function handleAuthorizationCodeGrant(c: Context, body: TokenRequest, clie
 
 	if (!verified) {
 		// invalid_grantは汎用メッセージ（詳細はログに記録済み）
-		// ここで弾かれた不正パラメータでは、消費も grant 失効も行わない。認可コードだけを盗んだ攻撃者が
-		// 不正なリクエストで正規の利用者のトークンを巻き添えで失効させる DoS を防ぐため
+		// 認可コードだけを盗んだ攻撃者によるDoSを防ぐため、
+		// 事前検証に失敗したリクエストでは、コードの消費も関連トークンの無効化も行わない。
 		return tokenErrorResponse(c, invalidGrant("The authorization code is invalid"));
 	}
 
 	const { codeRecord } = verified;
 
 	// [SECURITY] 認可コードの原子的消費とトークン発行を同一トランザクションで行う。
-	// 使用済み・期限切れ・並行交換での敗北はここで invalid_grant になり、再利用なら grant を失効。
+	// 使用済み・期限切れ・並行交換で消費できなかった場合はinvalid_grantを返し、再利用ならgrantと関連トークンを無効化する。
 	const result = await exchangeAuthorizationCode({ codeRecord, client });
 
 	if (result.type === "invalid_grant") {
@@ -227,15 +222,14 @@ async function handleAuthorizationCodeGrant(c: Context, body: TokenRequest, clie
 
 	// scopeは常に返す
 	// expires_inは実際の有効期限と一致させる
-	const responseBody: Record<string, unknown> = {
+	const responseBody = {
 		access_token: token.accessToken,
 		token_type: "Bearer",
 		expires_in: token.expiresIn,
 		scope: token.scope,
+		// リフレッシュトークンはクライアント種別によらず発行する
+		refresh_token: token.refreshToken,
 	};
-
-	// リフレッシュトークンはクライアント種別によらず発行する
-	responseBody.refresh_token = token.refreshToken;
 
 	return tokenSuccessResponse(c, responseBody);
 }
@@ -253,8 +247,8 @@ async function handleRefreshTokenGrant(c: Context, body: TokenRequest, client: C
 		return tokenErrorResponse(c, invalidRequest("Missing refresh_token parameter"));
 	}
 
-	// [SECURITY] 提示されたトークンの持ち主を確認する。使用済み・失効済み・期限切れの
-	// 判定はここでは行わない（判定は rotateRefreshToken が grant ロックの内側で行う）
+	// [SECURITY] 発行先のクライアントを確認する。再利用検知のため、使用済み・無効化済み・期限切れでも
+	// ここでは除外せず、rotateRefreshTokenがgrantの行ロック内で状態を判定する。
 	const verified = await verifyRefreshToken({
 		refreshToken,
 		clientId: client.clientId,
@@ -268,7 +262,6 @@ async function handleRefreshTokenGrant(c: Context, body: TokenRequest, client: C
 
 	const requestedScope = body.scope;
 
-	// 新しいアクセストークンを発行
 	// scope が省略されたときの既定値は grant 行から取るため、
 	// ここでは確定しない。ログに出すのは要求されたスコープそのものである。
 	logger.info("トークン発行: リフレッシュトークングラント", {
@@ -277,30 +270,25 @@ async function handleRefreshTokenGrant(c: Context, body: TokenRequest, client: C
 		requestedScope,
 	});
 
-	// [SECURITY] リフレッシュトークンを消費し、
-	// 新しいアクセストークンとリフレッシュトークンを発行する。消費できなかった場合は
-	// 猶予窓・再利用・期限切れに分類され、再利用なら grant 全体が失効する。
-	// 発行する新しいトークンは元のリフレッシュトークンと同じ grant に属する。
-	// 失敗の理由は応答に含めず、一律 invalid_grant で返す。
-	// 攻撃者に「そのトークンは以前有効だった」と教えないため。
+	// RTの状態に応じて、新しいAT・RTの発行、猶予期間内の再送への対応、
+	// または再利用検知によるgrantと関連するAT・RTの無効化を行う。
 	//
-	// [SECURITY] 要求スコープの検証もこの中で行う。ここで先に検証して
-	// 返してしまうと、範囲外のスコープを添えるだけで再利用検知をすり抜けられる。
+	// [SECURITY] RTの状態による拒否理由は、共通のinvalid_grantで返す。
+	//
+	// [SECURITY] 本実装では、スコープの検証はrotateRefreshToken内でRTの状態判定後に行う。
+	// スコープ不正で先に処理を終了すると、再利用に該当するRTが提示されても
+	// grantと関連するAT・RTを無効化できないため。
 	const result = await rotateRefreshToken({ tokenRecord, client, requestedScope });
 
 	if (result.type === "invalid_grant") {
 		return tokenErrorResponse(c, invalidGrant("The refresh token is invalid"));
 	}
 
-	// 元の認可範囲を超えるスコープの要求は invalid_scope
-	// （定義がこのケースを直接指す。検証済み RT ＋クライアント認証通過後にのみ
-	// 到達するため情報漏えいの懸念もない）
+	// スコープの修正を促すため、元の認可範囲を超える要求はinvalid_scopeで返す。
 	if (result.type === "invalid_scope") {
 		return tokenErrorResponse(c, invalidScope("The requested scope exceeds the original grant"));
 	}
 
-	// ローテーションした新しいリフレッシュトークンを返す。
-	// クライアントは古いほうを破棄する（draft-16 §4.3.2）。
 	return tokenSuccessResponse(c, {
 		access_token: result.token.accessToken,
 		token_type: "Bearer",

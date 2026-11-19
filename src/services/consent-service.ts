@@ -2,11 +2,8 @@ import { BlockList, isIP } from "node:net";
 import { findConsent, saveConsent } from "../repositories/consent-repository.js";
 
 /**
- * 同意サービス。
- * ユーザーの同意状態の確認と記録を行う。
- *
- * 非ループバックHTTPSへの応答で、要求スコープが同意済みならスキップ
- * 同意保存期間は無期限
+ * 同意を記録し、保存済みの同意で画面を省略できるか判定する。
+ * 同意の保存期間は無期限とし、再利用の可否は今回のリダイレクト先とスコープで判断する。
  */
 
 const loopbackAddresses = new BlockList();
@@ -58,7 +55,7 @@ export async function canSkipConsent(
 		return false;
 	}
 
-	// リクエストされたスコープがすべて過去の同意に含まれているか
+	// 同意済みの範囲を超えるスコープには、改めて同意を求める。
 	const requestedScopes = requestedScope.split(" ");
 	const consentedScopes = new Set(existing.scope.split(" "));
 

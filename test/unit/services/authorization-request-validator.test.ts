@@ -20,14 +20,17 @@ function validParams(overrides: Record<string, string> = {}): URLSearchParams {
 describe("validateAuthorizationRequest", () => {
 	describe("重複と検証順序", () => {
 		for (const name of ["client_id", "redirect_uri"]) {
-			it.each(["same", "different", "empty"])(`${name}の重複（%s）は画面へ返す`, (kind) => {
-				const params = validParams();
-				params.append(
-					name,
-					kind === "same" ? (params.get(name) ?? "") : kind === "empty" ? "" : "other",
-				);
-				expect(validateAuthorizationRequest(params).type).toBe("client_error");
-			});
+			it.each(["same", "different", "empty"])(
+				`${name}が重複している場合（%s）はclient_errorを返す`,
+				(kind) => {
+					const params = validParams();
+					params.append(
+						name,
+						kind === "same" ? (params.get(name) ?? "") : kind === "empty" ? "" : "other",
+					);
+					expect(validateAuthorizationRequest(params).type).toBe("client_error");
+				},
+			);
 		}
 		for (const name of [
 			"scope",
@@ -50,14 +53,14 @@ describe("validateAuthorizationRequest", () => {
 				});
 			});
 		}
-		it.each([{ client_id: "unknown" }, { redirect_uri: "https://attacker.example/callback" }])(
-			"scope重複と返し先の不正が共存してもリダイレクトしない: %j",
-			(overrides) => {
-				const params = validParams(overrides);
-				params.append("scope", "write");
-				expect(validateAuthorizationRequest(params).type).toBe("client_error");
-			},
-		);
+		it.each<Record<string, string>>([
+			{ client_id: "unknown" },
+			{ redirect_uri: "https://attacker.example/callback" },
+		])("scope重複と返し先の不正が共存してもリダイレクトしない: %j", (overrides) => {
+			const params = validParams(overrides);
+			params.append("scope", "write");
+			expect(validateAuthorizationRequest(params).type).toBe("client_error");
+		});
 		it("未知のパラメータの重複は無視する", () => {
 			const params = validParams();
 			params.append("unknown", "one");
@@ -201,9 +204,7 @@ describe("validateAuthorizationRequest", () => {
 		});
 
 		it("クエリパラメータ付きredirect_uriは完全一致しないと不一致エラー", () => {
-			// クエリパラメータ付き redirect_uri は「禁止」ではなく「完全一致必須」。
-			// 登録: http://127.0.0.1:8080/callback（クエリなし）に対しクエリ付きで来たら
-			// simple string comparison で不一致 → 「登録されたURIと一致しません」エラー
+			// 登録URIにはクエリがないため、クエリを追加したURIは不一致として拒否する。
 			const result = validateAuthorizationRequest(
 				validParams({ redirect_uri: "http://127.0.0.1:8080/callback?extra=value" }),
 			);
@@ -274,7 +275,7 @@ describe("validateAuthorizationRequest", () => {
 			}
 		});
 
-		it("stateの長さに制限はない", () => {
+		it("2,000文字のstateを受け付け、値をそのまま保持する", () => {
 			const longState = "a".repeat(2000);
 			const result = validateAuthorizationRequest(validParams({ state: longState }));
 			// エラー画面にもリダイレクトエラーにもならず、値をそのまま保持する

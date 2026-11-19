@@ -141,42 +141,45 @@ describe.each([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
 				["https://[::1]:54321/callback", false],
 				["com.example.native://callback", false],
 				["com.example.native:/oauth2redirect", false],
-			])("今回使うURIで判定する: %s", async (uri, shouldSkip) => {
-				await recordConsent(userId, clientId, "read write");
-				const { response, cookie } = await authorize(clientId, uri, afterLogin);
-				let issued = response;
-				if (shouldSkip) {
-					expect(response.status).toBe(302);
-				} else {
-					expect(response.status).toBe(200);
-					expect(response.headers.get("Location")).toBeNull();
-					expect(await testDb.select().from(authorizationCodes)).toHaveLength(0);
-					const html = await response.text();
-					expect(html).toContain("approve");
-					// OAuth 2.1 draft-16 §7.9: クライアント名と登録した組織を表示する
-					expect(html).toContain(getClient(clientId)?.clientName);
-					expect(html).toContain(`提供元: ${getClient(clientId)?.organizationName}`);
-					const txnId = html.match(/name="txnId" value="([^"]+)"/)?.[1];
-					assert(txnId);
-					issued = await app.request("/authorize", {
-						method: "POST",
-						headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookie },
-						body: new URLSearchParams({
-							decision: "approve",
-							txnId,
-							csrfToken: extractCsrfToken(html),
-						}),
-					});
-				}
-				expect(issued.status).toBe(shouldSkip ? 302 : 303);
-				expect(getRedirectParams(issued).get("code")).toBeTruthy();
-				const codes = await testDb.select().from(authorizationCodes);
-				expect(codes).toHaveLength(1);
-				expect(codes[0]).toMatchObject({ clientId, userId, redirectUri: uri, scope: "read" });
-			});
+			])(
+				"今回のリダイレクトURIに基づいて同意画面を省略するか決める: %s",
+				async (uri, shouldSkip) => {
+					await recordConsent(userId, clientId, "read write");
+					const { response, cookie } = await authorize(clientId, uri, afterLogin);
+					let issued = response;
+					if (shouldSkip) {
+						expect(response.status).toBe(302);
+					} else {
+						expect(response.status).toBe(200);
+						expect(response.headers.get("Location")).toBeNull();
+						expect(await testDb.select().from(authorizationCodes)).toHaveLength(0);
+						const html = await response.text();
+						expect(html).toContain("approve");
+						// OAuth 2.1 draft-16 §7.9: クライアント名と登録した組織を表示する
+						expect(html).toContain(getClient(clientId)?.clientName);
+						expect(html).toContain(`提供元: ${getClient(clientId)?.organizationName}`);
+						const txnId = html.match(/name="txnId" value="([^"]+)"/)?.[1];
+						assert(txnId);
+						issued = await app.request("/authorize", {
+							method: "POST",
+							headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookie },
+							body: new URLSearchParams({
+								decision: "approve",
+								txnId,
+								csrfToken: extractCsrfToken(html),
+							}),
+						});
+					}
+					expect(issued.status).toBe(shouldSkip ? 302 : 303);
+					expect(getRedirectParams(issued).get("code")).toBeTruthy();
+					const codes = await testDb.select().from(authorizationCodes);
+					expect(codes).toHaveLength(1);
+					expect(codes[0]).toMatchObject({ clientId, userId, redirectUri: uri, scope: "read" });
+				},
+			);
 
 			it.each([undefined, "read"])(
-				"HTTPSでも未同意の範囲は表示する: %s",
+				"HTTPSのリダイレクトURIでも要求scopeに未同意の範囲があれば同意画面を表示する（同意済みscope=%s）",
 				async (consentedScope) => {
 					if (consentedScope) await recordConsent(userId, clientId, consentedScope);
 					const { response } = await authorize(clientId, HTTPS_URI, afterLogin, "read write");
@@ -189,22 +192,25 @@ describe.each([TEST_PUBLIC_CLIENT, TEST_CONFIDENTIAL_CLIENT])(
 			it.each([
 				[HTTPS_URI, 302],
 				["http://127.0.0.1:8080/callback", 200],
-			])("redirect_uri省略時も確定したURIで判定: %s", async (uri, status) => {
-				const client = getClient(clientId);
-				assert(client);
-				client.redirectUris = [uri];
-				await recordConsent(userId, clientId, "read write");
-				const { response } = await authorize(clientId, uri, afterLogin, "read", true);
-				expect(response.status).toBe(status);
-				if (status === 302) expect(getRedirectParams(response).get("code")).toBeTruthy();
-				else expect(await testDb.select().from(authorizationCodes)).toHaveLength(0);
-			});
+			])(
+				"redirect_uri省略時も採用した登録URIに基づいて同意画面を省略するか決める: %s",
+				async (uri, status) => {
+					const client = getClient(clientId);
+					assert(client);
+					client.redirectUris = [uri];
+					await recordConsent(userId, clientId, "read write");
+					const { response } = await authorize(clientId, uri, afterLogin, "read", true);
+					expect(response.status).toBe(status);
+					if (status === 302) expect(getRedirectParams(response).get("code")).toBeTruthy();
+					else expect(await testDb.select().from(authorizationCodes)).toHaveLength(0);
+				},
+			);
 		});
 	},
 );
 
 describe("同意の保存", () => {
-	it("同じユーザーとクライアントの同意は1行に上書きする", async () => {
+	it("同じユーザーとクライアントの同意を更新すると、既存の1レコードを上書きする", async () => {
 		await recordConsent(userId, TEST_PUBLIC_CLIENT.clientId, "read write");
 		await recordConsent(userId, TEST_PUBLIC_CLIENT.clientId, "read");
 		const rows = await testDb.select().from(consents);
@@ -212,7 +218,7 @@ describe("同意の保存", () => {
 		expect(rows[0].scope).toBe("read");
 	});
 
-	it("並行する承認でも行は重複しない", async () => {
+	it("同じユーザーとクライアントの同意を並行して保存しても、レコードは重複しない", async () => {
 		await recordConsent(userId, TEST_PUBLIC_CLIENT.clientId, "read");
 		const scopes = ["read", "read write", "write", "read", "write"];
 		await Promise.all(
@@ -223,7 +229,7 @@ describe("同意の保存", () => {
 		expect(scopes).toContain(rows[0].scope);
 	});
 
-	it("クライアントが違えば別の行にする", async () => {
+	it("クライアントが異なる同意は別のレコードに保存する", async () => {
 		await recordConsent(userId, TEST_PUBLIC_CLIENT.clientId, "read");
 		await recordConsent(userId, TEST_CONFIDENTIAL_CLIENT.clientId, "write");
 		expect(await testDb.select().from(consents)).toHaveLength(2);

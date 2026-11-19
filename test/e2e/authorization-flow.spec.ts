@@ -1,7 +1,7 @@
 /**
  * 実ブラウザでの認可フロー。
- * APIの異常系は結合テスト（test/integration）で網羅しているので、ここではブラウザの遷移・Cookie・フォームが
- * 関わる経路に限る。
+ * APIの異常系は主に結合テスト（test/integration）で確認する。
+ * ここではブラウザの画面遷移・Cookie・フォームに関わる経路を確認する。
  */
 import { expect, test } from "@playwright/test";
 import { AS_ORIGIN, REDIRECT_URI } from "./config.js";
@@ -75,7 +75,7 @@ test("別タブで別ユーザーがログインすると古い同意は拒否�
 	await expect(page.locator(".current-user")).toHaveText("ログイン中のユーザー: testuser");
 	const consentUrl = page.url();
 	const other = await context.newPage();
-	// ログイン済みGET /loginはフォームを省略するため、現在のセッションのCSRFでPOSTする。
+	// ログイン済みのGET /loginはフォームを表示しないため、現在のセッションのCSRFトークンでPOSTする。
 	const csrfToken = await page.locator('input[name="csrfToken"]').first().inputValue();
 	await other.goto(consentUrl);
 	const login = other.waitForResponse(
@@ -160,7 +160,7 @@ test("パスワードを誤ったあと、同じ画面から再入力してロ�
 
 	await submitLogin(page, undefined, "wrong-password");
 	await expect(page.locator(".error")).toBeVisible();
-	// 失敗ではセッションを作り直さない（同じフォーム・同じトークンで再送できる）。
+	// パスワードの不一致ではセッションを作り直さず、同じフォームとCSRFトークンで再試行できる。
 	expect((await sessionCookie(context))?.value).toBe(before?.value);
 
 	await submitLogin(page);
@@ -203,7 +203,7 @@ test("複数タブ: 一方でログインすると、他方の古いログイン
 	await submitLogin(tabA);
 	await expect(tabA.locator("button.approve")).toBeVisible();
 
-	// タブBのフォームはログイン前のセッションのトークンを持っている。Cookieは新しいので403。
+	// タブBのフォームに残る古いCSRFトークンは、ログイン後のCookieが示すセッションと一致せず403になる。
 	const rejected = tabB.waitForResponse(
 		(r) => r.url() === `${AS_ORIGIN}/login` && r.request().method() === "POST",
 	);
@@ -215,7 +215,7 @@ test("複数タブ: 一方でログインすると、他方の古いログイン
 	await tabB.reload();
 	await expect(tabB.locator("button.approve")).toBeVisible();
 
-	// 両タブの同意は同じセッションのトークンで送れる。一方の送信で他方が無効にならない。
+	// CSRFトークンは同意POSTで消費しないため、両タブから同じセッションのCSRFトークンで同意を送れる。
 	await tabA.click("button.approve");
 	await expect(tabA.locator("#callback")).toBeVisible();
 	await tabB.click("button.approve");

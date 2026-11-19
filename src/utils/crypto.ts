@@ -17,8 +17,7 @@ export function generateRandomString(byteLength: number = 32): string {
 }
 
 /**
- * SHA-256ハッシュを計算する。
- * 認可コードやリフレッシュトークンのDB保存時のハッシュ化に使用。
+ * DB保存用のSHA-256ハッシュをhex文字列で返す。
  *
  * [SECURITY] DB漏洩時にトークンが直接漏れることを防ぐため、
  * 認可コードとリフレッシュトークンはハッシュして保存する。
@@ -31,8 +30,7 @@ export function sha256(input: string): string {
 }
 
 /**
- * SHA-256ハッシュをBase64URLエンコードで返す。
- * PKCE S256のcode_challenge計算に使用。
+ * PKCE S256用のSHA-256ハッシュをBase64URLエンコードで返す。
  *
  * [SECURITY] PKCE: code_verifierからcode_challengeを計算する際に使用。
  * code_challenge = BASE64URL(SHA256(code_verifier))
@@ -45,12 +43,11 @@ export function sha256Base64url(input: string): string {
 }
 
 /**
- * 定数時間での文字列比較を行う。
+ * ハッシュ値やCSRFトークンを比較する。
  *
- * [SECURITY] タイミング攻撃対策。
- * 通常の文字列比較(===)は不一致が見つかった時点で処理を終了するため、
- * 攻撃者がレスポンス時間の差から正しい文字列を推測できる。
- * この関数は入力の長さや内容に関わらず常に同じ時間で比較を行う。
+ * [SECURITY] 内容の一致位置による時間差を抑えるため、timingSafeEqualを使う。
+ * 文字数が同じならUTF-8のバイト数も同じになる入力を前提とする。
+ * 長さの分岐やBuffer変換も含めた処理時間の一定性は保証しない。
  *
  * @param a 比較対象の文字列
  * @param b 比較対象の文字列
@@ -59,7 +56,7 @@ export function sha256Base64url(input: string): string {
 // #@range_begin(constant-time-equal) ※書籍掲載用の範囲マーカー
 export function constantTimeEqual(a: string, b: string): boolean {
 	if (a.length !== b.length) {
-		// 長さが異なる場合もタイミングを漏らさないようにダミー比較を行う
+		// 長さが異なる場合も比較処理を行ってから不一致を返す。
 		const dummy = Buffer.from(a);
 		crypto.timingSafeEqual(dummy, dummy);
 		return false;

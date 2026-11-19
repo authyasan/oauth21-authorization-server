@@ -18,13 +18,8 @@ export interface SessionData {
 /**
  * メモリベースのセッション管理サービス。
  *
- * [SECURITY] セッションIDは128ビット（16バイト）のCSPRNG出力で生成する。
- * セッションIDが推測可能だと、セッションハイジャックが成立する。
- *
- * セッション保存先はサーバーサイド（メモリ）。
- * 単一サーバー構成の学習用プロジェクトのため、シンプルさを優先。
- * サーバー再起動で全セッションが消失するが、認可コードやトークンは
- * DBに永続化されているため影響は限定的。
+ * 学習用の単一プロセス構成を前提に、メモリへ保存する。
+ * 再起動すると全セッションが消失し、ログイン状態も失われる。
  */
 
 /** セッション有効期限（30分） */
@@ -40,13 +35,13 @@ interface StoredSession {
 }
 
 /** メモリ上のセッションストア */
+// [SECURITY] 学習用に定期削除と件数上限を省略しており、再参照されない期限切れデータはメモリに残る。
 const sessions = new Map<string, StoredSession>();
 
 /**
  * 新しいセッションを作成する。
  *
- * [SECURITY] セッションIDはCSPRNGで生成。予測可能なIDを使うと
- * セッション固定攻撃やセッションハイジャックが成立する。
+ * [SECURITY] セッションIDの推測によるなりすましを防ぐため、CSPRNGで生成する。
  *
  * @returns セッションID
  */
@@ -75,7 +70,6 @@ export function getSession(sessionId: string): SessionData | null {
 		return null;
 	}
 
-	// 有効期限チェック
 	if (new Date() > stored.expiresAt) {
 		sessions.delete(sessionId);
 		return null;
@@ -100,7 +94,6 @@ export function updateSession(
 		return false;
 	}
 
-	// 有効期限チェック
 	if (new Date() > stored.expiresAt) {
 		sessions.delete(sessionId);
 		return false;
