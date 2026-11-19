@@ -129,7 +129,7 @@ docker compose -f compose.quickstart.yaml up -d --build --wait app
 
 ## ホストのNode.jsで開発する場合
 
-Dockerの簡易起動とは別の環境です。Node.js 26.12.1とnpm、PostgreSQL用のDockerを準備します。両方のアプリを同時に起動するとポート3000が競合するため、先に片方を停止してください。
+Dockerの簡易起動とは別の環境です。Node.js 26.13.1とnpm、PostgreSQL用のDockerを準備します。両方のアプリを同時に起動するとポート3000が競合するため、先に片方を停止してください。
 
 ```bash
 npm ci

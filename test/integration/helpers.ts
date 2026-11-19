@@ -7,8 +7,7 @@ import { sha256Base64url } from "../../src/utils/crypto.js";
 import { assertTestCleanupDatabaseName, DEFAULT_INTEGRATION_DATABASE_URL } from "./db-guard.js";
 
 // テスト用DB接続
-const TEST_DATABASE_URL =
-	process.env.DATABASE_URL || DEFAULT_INTEGRATION_DATABASE_URL;
+const TEST_DATABASE_URL = process.env.DATABASE_URL || DEFAULT_INTEGRATION_DATABASE_URL;
 
 const testClient = postgres(TEST_DATABASE_URL);
 export const testDb = drizzle(testClient, { schema });
