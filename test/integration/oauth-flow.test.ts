@@ -344,10 +344,10 @@ describe("OAuth 2.1 結合テスト", () => {
 
 					// セッションCookieを取得
 					const setCookieHeader = authRes.headers.get("Set-Cookie");
-					expect(setCookieHeader).toBeTruthy();
-					const sidMatch = setCookieHeader!.match(/sid=([^;]+)/);
-					expect(sidMatch).toBeTruthy();
-					const sessionCookie = `sid=${sidMatch![1]}`;
+					assert(setCookieHeader);
+					const sidMatch = setCookieHeader.match(/sid=([^;]+)/);
+					assert(sidMatch);
+					const sessionCookie = `sid=${sidMatch[1]}`;
 
 					const loginLocation = authRes.headers.get("Location");
 					assert(loginLocation);
@@ -407,7 +407,7 @@ describe("OAuth 2.1 結合テスト", () => {
 					const redirectParams = getRedirectParams(consentRes);
 					const code = redirectParams.get("code");
 					const state = redirectParams.get("state");
-					expect(code).toBeTruthy();
+					assert(code);
 					expect(state).toBe("test-state-12345678901234567890ab");
 
 					// Step 5: トークン交換
@@ -423,7 +423,7 @@ describe("OAuth 2.1 結合テスト", () => {
 						},
 						body: formBody({
 							grant_type: "authorization_code",
-							code: code!,
+							code,
 							redirect_uri: TEST_CONFIDENTIAL_CLIENT.redirectUri,
 							code_verifier: codeVerifier,
 						}),
@@ -2248,8 +2248,10 @@ describe("OAuth 2.1 結合テスト", () => {
 			expect(authRes.status).toBe(302);
 			const txnId = extractTxnIdFromLocation(authRes);
 			const setCookieHeader = authRes.headers.get("Set-Cookie");
-			const sidMatch = setCookieHeader!.match(/sid=([^;]+)/);
-			let sessionCookie = `sid=${sidMatch![1]}`;
+			assert(setCookieHeader);
+			const sidMatch = setCookieHeader.match(/sid=([^;]+)/);
+			assert(sidMatch);
+			let sessionCookie = `sid=${sidMatch[1]}`;
 
 			// Step 2: ログイン
 			const loginRes = await request("/login", {
@@ -2660,8 +2662,10 @@ describe("OAuth 2.1 結合テスト", () => {
 			const authRes = await request(authorizeUrl);
 			const txnId = extractTxnIdFromLocation(authRes);
 			const setCookieHeader = authRes.headers.get("Set-Cookie");
-			const sidMatch = setCookieHeader!.match(/sid=([^;]+)/);
-			let sessionCookie = `sid=${sidMatch![1]}`;
+			assert(setCookieHeader);
+			const sidMatch = setCookieHeader.match(/sid=([^;]+)/);
+			assert(sidMatch);
+			let sessionCookie = `sid=${sidMatch[1]}`;
 
 			// ログイン
 			const loginRes = await request("/login", {
@@ -4095,7 +4099,9 @@ describe("OAuth 2.1 結合テスト", () => {
 		// 同意済みの場合は直接リダイレクト
 		if (authRes2.status === 302) {
 			const params = getRedirectParams(authRes2);
-			return params.get("code")!;
+			const code = params.get("code");
+			assert(code);
+			return code;
 		}
 
 		// 同意承認（hidden form field の txnId を渡す）
@@ -4113,7 +4119,9 @@ describe("OAuth 2.1 結合テスト", () => {
 		});
 
 		const redirectParams = getRedirectParams(consentRes);
-		return redirectParams.get("code")!;
+		const code = redirectParams.get("code");
+		assert(code);
+		return code;
 	}
 
 	/**

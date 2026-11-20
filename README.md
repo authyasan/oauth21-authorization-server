@@ -144,6 +144,8 @@ npm run generate-keys           # 初回のみ。既存の署名鍵を上書き�
 npm run dev                     # 開発サーバー起動
 ```
 
+上巻対応版（`upper-v1.0.0`）では、DBスキーマの管理に使う `drizzle-kit` が間接的に `esbuild@0.18.20` を取り込むため、`npm ci` や `npm audit` で警告が表示されることがあります。対象は esbuild の開発サーバー機能で、付録Aの手順や上記の起動手順ではこの機能を使いません。[esbuild のセキュリティ情報](https://github.com/evanw/esbuild/security/advisories/GHSA-67mh-4wv8-2f99)
+
 ## テスト
 
 次はホストのNode.js環境で実行するコマンドです。結合テストには専用DB `oauth21_integration_test`を使い、テストごとにデータを初期化します。動作確認用の`oauth21`とは分けています。付録Aの`compose.quickstart.yaml`による起動・停止手順は変更ありません。
